@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-Layers-Utility"
-description = "Advanced Block LoRA merging node for ComfyUI (allows selective LoRA block merging)"
+description = "This custom node for ComfyUI provides a powerful and flexible dynamic layering system, similar to what you would find in image editing software like Photoshop."
 version = "1.0.4"
 license = { file = "LICENSE.txt" }
 
