@@ -12,16 +12,21 @@ The entire system is managed through a single node: **Layer System (Dynamic)**. 
 
 ## Per-Layer Controls
 
-| Parameter             | Type     | Description |
-|-----------------------|----------|-------------|
-| **Enabled**           | Toggle   | A master switch to enable or disable the layer entirely. |
-| **Up / Down**         | Buttons  | Moves the layer up or down in the stacking order, automatically re-wiring the connections. |
-| **blend_mode**        | Combo    | Sets the blending mode for the layer. Options include `normal`, `multiply`, `screen`, `overlay`, `soft_light`, and `hard_light`. |
-| **opacity**           | Number   | Controls the opacity of the layer, from `0.0` (transparent) to `1.0` (opaque). |
-| **resize_mode**       | Combo    | Determines how to handle layers with a different size than the base image canvas:  <br> • **stretch**: Stretches the layer to fit the canvas, ignoring aspect ratio.  <br> • **fit**: Resizes the layer to fit inside the canvas while maintaining aspect ratio.  <br> • **cover**: Resizes the layer to cover the entire canvas while maintaining aspect ratio (parts may be cropped).  <br> • **crop**: Places the layer on the canvas without resizing. |
-| **scale**             | Number   | *(Visible only in crop mode).* Scales the layer before placing it on the canvas. |
-| **offset_x / offset_y** | Number | *(Visible only in crop mode).* Controls the X and Y position of the layer on the canvas. |
-
+| Parameter | Type | Description |
+| :--- | :--- | :--- |
+| **Enabled** | Toggle | A master switch to enable or disable the layer entirely. |
+| **Up / Down** | Buttons | Moves the layer up or down in the stacking order. |
+| **blend_mode** | Combo | Sets the blending mode (`normal`, `multiply`, `screen`, `overlay`, etc.). |
+| **opacity** | Number | Controls the opacity of the layer from 0.0 (transparent) to 1.0 (opaque). |
+| **Color Adjustments** | Toggle | A collapsible section to show or hide all color-related controls. |
+| **Brightness** | Number | Adjusts the overall brightness of the layer (-1.0 to 1.0). |
+| **Contrast** | Number | Adjusts the overall contrast of the layer (-1.0 to 1.0). |
+| **Saturation** | Number | Controls the color intensity of the layer (0.0 is grayscale, 1.0 is original). |
+| **R / G / B** | Number | Adjusts the intensity of the Red, Green, and Blue channels individually. |
+| **Invert Mask** | Toggle | Inverts the connected mask (visible only if a mask is connected). |
+| **resize_mode** | Combo | Determines how the layer is placed: `stretch`, `fit`, `cover`, or `crop`. |
+| **scale** | Number | Scales the layer (visible only in `crop` mode). |
+| **offset_x / offset_y** | Number | Controls the X and Y position of the layer (visible only in `crop` mode). |
 -----
 <img width="2411" height="1158" alt="Capture d'écran 2025-07-20 152255" src="https://github.com/user-attachments/assets/bf77959e-2db6-49db-be49-dbb83bf12fbd" />
 
