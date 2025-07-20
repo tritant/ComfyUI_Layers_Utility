@@ -11,6 +11,16 @@ app.registerExtension({
             return;
         }
 
+        // --- Fonction utilitaire pour redimensionner la hauteur uniquement ---
+        const resizeHeight = function() {
+            if (!this.size) return;
+            const newSize = this.computeSize();
+            // Ne met à jour que la hauteur, en conservant la largeur actuelle
+            this.size[1] = newSize[1]; 
+            this.onResize?.(this.size);
+            this.graph.setDirtyCanvas(true, true);
+        };
+
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (info) {
             onConfigure?.apply(this, arguments);
@@ -60,6 +70,7 @@ app.registerExtension({
             this.updateLayerWidgets();
             this.ensureWildcardInputs();
             this.updatePropertiesJSON();
+            resizeHeight.call(this);
         };
         
         nodeType.prototype.moveLayer = function(layer_index, direction) {
@@ -116,42 +127,34 @@ app.registerExtension({
             this.addWidget("combo", `blend_mode_${layer_name}`, props.blend_mode, (v) => { props.blend_mode = v; this.updatePropertiesJSON(); }, {values: BLEND_MODES});
             this.addWidget("number", `opacity_${layer_name}`, props.opacity, (v) => { props.opacity = v; this.updatePropertiesJSON(); }, {min: 0.0, max: 1.0, step: 0.1, precision: 2});
             
-            // --- SECTION COULEUR REPLIABLE (LOGIQUE CORRIGÉE) ---
-
-            // 1. Créer le bouton de bascule D'ABORD pour qu'il apparaisse en premier
             const toggle_button = this.addWidget("toggle", `toggle_color_${layer_name}`, !props.color_section_collapsed, (v) => {
                 props.color_section_collapsed = !v;
                 updateColorWidgetsVisibility();
                 this.updatePropertiesJSON();
             }, { on: "▼ Color Adjustments", off: "▶ Color Adjustments" });
 
-            // 2. Créer les widgets de couleur et les stocker dans une liste
             const color_widgets = [
-                this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => { props.brightness = v; this.updatePropertiesJSON(); }, { label: "Luminosité", min: -1.0, max: 1.0, step: 0.1, precision: 2 }),
-                this.addWidget("number", `contrast_${layer_name}`, props.contrast, (v) => { props.contrast = v; this.updatePropertiesJSON(); }, { label: "Contraste", min: -1.0, max: 1.0, step: 0.1, precision: 2 }),
+                this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => { props.brightness = v; this.updatePropertiesJSON(); }, { label: "Brightness", min: -1.0, max: 1.0, step: 0.1, precision: 2 }),
+                this.addWidget("number", `contrast_${layer_name}`, props.contrast, (v) => { props.contrast = v; this.updatePropertiesJSON(); }, { label: "Contrast", min: -1.0, max: 1.0, step: 0.1, precision: 2 }),
                 this.addWidget("number", `saturation_${layer_name}`, props.saturation, (v) => { props.saturation = v; this.updatePropertiesJSON(); }, { label: "Saturation", min: 0.0, max: 2.0, step: 0.1, precision: 2 }),
                 this.addWidget("number", `color_r_${layer_name}`, props.color_r, (v) => { props.color_r = v; this.updatePropertiesJSON(); }, { label: "R", min: 0.0, max: 2.0, step: 0.1, precision: 2 }),
                 this.addWidget("number", `color_g_${layer_name}`, props.color_g, (v) => { props.color_g = v; this.updatePropertiesJSON(); }, { label: "G", min: 0.0, max: 2.0, step: 0.1, precision: 2 }),
                 this.addWidget("number", `color_b_${layer_name}`, props.color_b, (v) => { props.color_b = v; this.updatePropertiesJSON(); }, { label: "B", min: 0.0, max: 2.0, step: 0.1, precision: 2 })
             ];
             
-            // 3. Stocker la taille originale de chaque widget
             for (const w of color_widgets) {
                 w.originalComputeSize = w.computeSize;
             }
 
-            // 4. Définir la fonction qui gère la visibilité ET la taille
             const updateColorWidgetsVisibility = () => {
                 for (const w of color_widgets) {
                     w.hidden = props.color_section_collapsed;
                     w.computeSize = props.color_section_collapsed ? () => [0, -4] : w.originalComputeSize;
                 }
-                this.onResize?.(this.size);
+                resizeHeight.call(this);
             };
-            updateColorWidgetsVisibility(); // Appel initial pour définir le bon état
+            updateColorWidgetsVisibility();
             
-            // --- FIN SECTION COULEUR ---
-
             const mask_input_name = layer_name.replace("layer_", "mask_");
             const mask_input = this.inputs.find(i => i.name === mask_input_name);
             if (mask_input && mask_input.link !== null) {
@@ -173,7 +176,7 @@ app.registerExtension({
                     w.hidden = !showTransformControls;
                     w.computeSize = showTransformControls ? w.originalComputeSize : () => [0, -4];
                 });
-                this.onResize?.(this.size);
+                resizeHeight.call(this);
             };
 
             resizeModeWidget.callback = (v) => {
@@ -194,7 +197,7 @@ app.registerExtension({
             const connectedInputs = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null);
             connectedInputs.sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1]));
             for (const input of connectedInputs) { this.addLayerWidgets(input.name); }
-            this.onResize?.(this.size);
+            resizeHeight.call(this);
         };
 
         nodeType.prototype.handleDisconnectedInputs = function() {
