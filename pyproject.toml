@@ -1,0 +1,13 @@
+[project]
+name = "comfyui-flux-block-lora-merger"
+description = "Advanced Block LoRA merging node for ComfyUI (allows selective LoRA block merging)"
+version = "1.0.4"
+license = { file = "LICENSE.txt" }
+
+[project.urls]
+Repository = "https://github.com/tritant/ComfyUI_Flux_Block_Lora_Merger"
+
+[tool.comfy]
+PublisherId = "tritant"
+DisplayName = "Flux Block LoRA Merger"
+Icon = ""
