@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-Layers-Utility"
 description = "This custom node for ComfyUI provides a powerful and flexible dynamic layering system, similar to what you would find in image editing software like Photoshop."
-version = "1.0.0"
+version = "1.0.5"
 license = { file = "LICENSE.txt" }
 
 [project.urls]
