@@ -29,6 +29,9 @@ The entire system is managed through a single node: **Layer System (Dynamic)**. 
 | **offset_x / offset_y** | Number | Controls the X and Y position of the layer (visible only in `crop` mode). |
 -----
 <img width="2411" height="1158" alt="Capture d'écran 2025-07-20 152255" src="https://github.com/user-attachments/assets/bf77959e-2db6-49db-be49-dbb83bf12fbd" />
+-----
+<img width="2387" height="1158" alt="Capture d'écran 2025-07-20 221503" src="https://github.com/user-attachments/assets/4f926a4c-8720-4904-ba68-b581972e4ce9" />
+
 
 
 This system allows for building complex, multi-element scenes in a dynamic and non-destructive way.
