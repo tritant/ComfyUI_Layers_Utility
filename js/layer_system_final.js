@@ -11,11 +11,9 @@ app.registerExtension({
             return;
         }
 
-        // --- Fonction utilitaire pour redimensionner la hauteur uniquement ---
         const resizeHeight = function() {
             if (!this.size) return;
             const newSize = this.computeSize();
-            // Ne met à jour que la hauteur, en conservant la largeur actuelle
             this.size[1] = newSize[1]; 
             this.onResize?.(this.size);
             this.graph.setDirtyCanvas(true, true);
@@ -111,6 +109,7 @@ app.registerExtension({
                     saturation: 1.0,
                     invert_mask: false,
                     color_section_collapsed: true,
+                    layer_collapsed: true, // État du calque principal
                 };
             }
             const props = this.layer_properties[layer_name];
@@ -123,73 +122,95 @@ app.registerExtension({
                 spacer.computeSize = () => [0, 20];
             }
             
-            this.addWidget("toggle", `enabled_${layer_name}`, props.enabled, (v) => { props.enabled = v; this.updatePropertiesJSON(); }, {label: `Layer ${layer_index} Enabled`});
-            this.addWidget("combo", `blend_mode_${layer_name}`, props.blend_mode, (v) => { props.blend_mode = v; this.updatePropertiesJSON(); }, {values: BLEND_MODES});
-            this.addWidget("number", `opacity_${layer_name}`, props.opacity, (v) => { props.opacity = v; this.updatePropertiesJSON(); }, {min: 0.0, max: 1.0, step: 0.1, precision: 2});
+            // --- SECTION PRINCIPALE REPLIABLE ---
+            const layerToggle = this.addWidget("toggle", `toggle_layer_${layer_name}`, !props.layer_collapsed, (v) => {
+                props.layer_collapsed = !v;
+                updateVisibility();
+                this.updatePropertiesJSON();
+            }, { on: `▼ Layer ${layer_index} Settings`, off: `▶ Layer ${layer_index} Settings` });
+
+            const collapsibleWidgets = [];
+            const colorWidgets = [];
+
+            // Création des widgets et ajout à la liste des éléments repliables
+            collapsibleWidgets.push(this.addWidget("toggle", `enabled_${layer_name}`, props.enabled, (v) => { props.enabled = v; this.updatePropertiesJSON(); }, {label: `Layer ${layer_index} Enabled`}));
+            collapsibleWidgets.push(this.addWidget("combo", `blend_mode_${layer_name}`, props.blend_mode, (v) => { props.blend_mode = v; this.updatePropertiesJSON(); }, {values: BLEND_MODES}));
+            collapsibleWidgets.push(this.addWidget("number", `opacity_${layer_name}`, props.opacity, (v) => { props.opacity = v; this.updatePropertiesJSON(); }, {min: 0.0, max: 1.0, step: 0.1, precision: 2}));
             
-            const toggle_button = this.addWidget("toggle", `toggle_color_${layer_name}`, !props.color_section_collapsed, (v) => {
+            const colorToggle = this.addWidget("toggle", `toggle_color_${layer_name}`, !props.color_section_collapsed, (v) => {
                 props.color_section_collapsed = !v;
-                updateColorWidgetsVisibility();
+                updateVisibility();
                 this.updatePropertiesJSON();
             }, { on: "▼ Color Adjustments", off: "▶ Color Adjustments" });
+            collapsibleWidgets.push(colorToggle);
 
-            const color_widgets = [
-                this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => { props.brightness = v; this.updatePropertiesJSON(); }, { label: "Brightness", min: -1.0, max: 1.0, step: 0.1, precision: 2 }),
-                this.addWidget("number", `contrast_${layer_name}`, props.contrast, (v) => { props.contrast = v; this.updatePropertiesJSON(); }, { label: "Contrast", min: -1.0, max: 1.0, step: 0.1, precision: 2 }),
-                this.addWidget("number", `saturation_${layer_name}`, props.saturation, (v) => { props.saturation = v; this.updatePropertiesJSON(); }, { label: "Saturation", min: 0.0, max: 2.0, step: 0.1, precision: 2 }),
-                this.addWidget("number", `color_r_${layer_name}`, props.color_r, (v) => { props.color_r = v; this.updatePropertiesJSON(); }, { label: "R", min: 0.0, max: 2.0, step: 0.1, precision: 2 }),
-                this.addWidget("number", `color_g_${layer_name}`, props.color_g, (v) => { props.color_g = v; this.updatePropertiesJSON(); }, { label: "G", min: 0.0, max: 2.0, step: 0.1, precision: 2 }),
-                this.addWidget("number", `color_b_${layer_name}`, props.color_b, (v) => { props.color_b = v; this.updatePropertiesJSON(); }, { label: "B", min: 0.0, max: 2.0, step: 0.1, precision: 2 })
-            ];
-            
-            for (const w of color_widgets) {
-                w.originalComputeSize = w.computeSize;
-            }
-
-            const updateColorWidgetsVisibility = () => {
-                for (const w of color_widgets) {
-                    w.hidden = props.color_section_collapsed;
-                    w.computeSize = props.color_section_collapsed ? () => [0, -4] : w.originalComputeSize;
-                }
-                resizeHeight.call(this);
-            };
-            updateColorWidgetsVisibility();
+            colorWidgets.push(this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => { props.brightness = v; this.updatePropertiesJSON(); }, { label: "Brightness", min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
+            colorWidgets.push(this.addWidget("number", `contrast_${layer_name}`, props.contrast, (v) => { props.contrast = v; this.updatePropertiesJSON(); }, { label: "Contrast", min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
+            colorWidgets.push(this.addWidget("number", `saturation_${layer_name}`, props.saturation, (v) => { props.saturation = v; this.updatePropertiesJSON(); }, { label: "Saturation", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
+            colorWidgets.push(this.addWidget("number", `color_r_${layer_name}`, props.color_r, (v) => { props.color_r = v; this.updatePropertiesJSON(); }, { label: "R", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
+            colorWidgets.push(this.addWidget("number", `color_g_${layer_name}`, props.color_g, (v) => { props.color_g = v; this.updatePropertiesJSON(); }, { label: "G", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
+            colorWidgets.push(this.addWidget("number", `color_b_${layer_name}`, props.color_b, (v) => { props.color_b = v; this.updatePropertiesJSON(); }, { label: "B", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
+            collapsibleWidgets.push(...colorWidgets);
             
             const mask_input_name = layer_name.replace("layer_", "mask_");
             const mask_input = this.inputs.find(i => i.name === mask_input_name);
             if (mask_input && mask_input.link !== null) {
-                this.addWidget("toggle", `invert_mask_${layer_name}`, !!props.invert_mask, (v) => { props.invert_mask = v; this.updatePropertiesJSON(); }, { label: "Invert Mask" });
+                collapsibleWidgets.push(this.addWidget("toggle", `invert_mask_${layer_name}`, !!props.invert_mask, (v) => { props.invert_mask = v; this.updatePropertiesJSON(); }, { label: "Invert Mask" }));
             }
 
-            const resizeModeWidget = this.addWidget("combo", `resize_mode_${layer_name}`, props.resize_mode, () => {}, { values: RESIZE_MODES });
-            const scaleWidget = this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => { props.scale = v; this.updatePropertiesJSON(); }, { min: 0.01, max: 10.0, step: 0.1, precision: 2 });
-            const offsetXWidget = this.addWidget("number", `offset_x_${layer_name}`, props.offset_x, (v) => { props.offset_x = v; this.updatePropertiesJSON(); }, { min: -8192, max: 8192, step: 10 });
-            const offsetYWidget = this.addWidget("number", `offset_y_${layer_name}`, props.offset_y, (v) => { props.offset_y = v; this.updatePropertiesJSON(); }, { min: -8192, max: 8192, step: 10 });
-            
-            scaleWidget.originalComputeSize = scaleWidget.computeSize;
-            offsetXWidget.originalComputeSize = offsetXWidget.computeSize;
-            offsetYWidget.originalComputeSize = offsetYWidget.computeSize;
-            
-            const updateTransformVisibility = (resize_mode) => {
-                const showTransformControls = (resize_mode === 'crop');
-                [scaleWidget, offsetXWidget, offsetYWidget].forEach(w => {
-                    w.hidden = !showTransformControls;
-                    w.computeSize = showTransformControls ? w.originalComputeSize : () => [0, -4];
-                });
-                resizeHeight.call(this);
-            };
-
-            resizeModeWidget.callback = (v) => {
+            collapsibleWidgets.push(this.addWidget("combo", `resize_mode_${layer_name}`, props.resize_mode, (v) => {
                 props.resize_mode = v;
-                updateTransformVisibility(v);
+                updateVisibility(); // Mettre à jour la visibilité des contrôles de transformation
                 this.updatePropertiesJSON();
-            };
-            updateTransformVisibility(props.resize_mode);
+            }, { values: RESIZE_MODES }));
 
+            const transformWidgets = [
+                this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => { props.scale = v; this.updatePropertiesJSON(); }, { min: 0.01, max: 10.0, step: 0.1, precision: 2 }),
+                this.addWidget("number", `offset_x_${layer_name}`, props.offset_x, (v) => { props.offset_x = v; this.updatePropertiesJSON(); }, { min: -8192, max: 8192, step: 10 }),
+                this.addWidget("number", `offset_y_${layer_name}`, props.offset_y, (v) => { props.offset_y = v; this.updatePropertiesJSON(); }, { min: -8192, max: 8192, step: 10 })
+            ];
+            collapsibleWidgets.push(...transformWidgets);
+
+            // Sauvegarder la taille originale pour tous les widgets repliables
+            for (const w of collapsibleWidgets) {
+                w.originalComputeSize = w.computeSize;
+            }
+
+            // Les boutons Up/Down ne sont PAS repliables
             const up_button = this.addWidget("button", "Up", null, () => { this.moveLayer(layer_index, "up"); });
             const down_button = this.addWidget("button", "Down", null, () => { this.moveLayer(layer_index, "down"); });
             if (layer_index === 1) up_button.disabled = true;
             if (layer_index === total_layers) down_button.disabled = true;
+            
+            // --- LOGIQUE DE VISIBILITÉ ---
+            const updateVisibility = () => {
+                const isLayerCollapsed = props.layer_collapsed;
+                const isColorCollapsed = props.color_section_collapsed;
+                const showTransformControls = props.resize_mode === 'crop';
+
+                for(const w of collapsibleWidgets) {
+                    let isHidden = isLayerCollapsed;
+
+                    // Logique pour la section couleur
+                    if (colorWidgets.includes(w)) {
+                        isHidden = isLayerCollapsed || isColorCollapsed;
+                    }
+                    if (w === colorToggle) {
+                        isHidden = isLayerCollapsed;
+                    }
+                    
+                    // Logique pour la section transformation
+                    if (transformWidgets.includes(w)) {
+                        isHidden = isLayerCollapsed || !showTransformControls;
+                    }
+
+                    w.hidden = isHidden;
+                    w.computeSize = isHidden ? () => [0, -4] : w.originalComputeSize;
+                }
+                resizeHeight.call(this);
+            };
+
+            updateVisibility(); // Appel initial
         };
         
         nodeType.prototype.updateLayerWidgets = function() {
