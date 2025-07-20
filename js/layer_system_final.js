@@ -1,6 +1,6 @@
 import { app } from "/scripts/app.js";
 
-const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "soft_light", "hard_light"];
+const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "soft_light", "hard_light", "difference", "color_dodge", "color_burn"];
 const RESIZE_MODES = ["stretch", "fit", "cover", "crop"];
 
 app.registerExtension({
@@ -78,13 +78,8 @@ app.registerExtension({
             const mask_input_A = this.inputs.find(i => i.name === mask_name_A);
             const mask_input_B = this.inputs.find(i => i.name === mask_name_B);
 
-            const temp_link = input_A.link;
-            input_A.link = input_B.link;
-            input_B.link = temp_link;
-
-            const temp_mask_link = mask_input_A.link;
-            mask_input_A.link = mask_input_B.link;
-            mask_input_B.link = temp_mask_link;
+            [input_A.link, input_B.link] = [input_B.link, input_A.link];
+            [mask_input_A.link, mask_input_B.link] = [mask_input_B.link, mask_input_A.link];
 
             if (this.graph.links[input_A.link]) this.graph.links[input_A.link].target_slot = this.inputs.indexOf(input_A);
             if (this.graph.links[input_B.link]) this.graph.links[input_B.link].target_slot = this.inputs.indexOf(input_B);
@@ -100,6 +95,11 @@ app.registerExtension({
                 this.layer_properties[layer_name] = {
                     blend_mode: "normal", opacity: 1.0, enabled: true,
                     resize_mode: "fit", scale: 1.0, offset_x: 0, offset_y: 0,
+                    brightness: 0.0, contrast: 0.0,
+                    color_r: 1.0, color_g: 1.0, color_b: 1.0,
+                    saturation: 1.0,
+                    invert_mask: false,
+                    color_section_collapsed: true,
                 };
             }
             const props = this.layer_properties[layer_name];
@@ -110,42 +110,83 @@ app.registerExtension({
                 const spacer = this.addWidget("text", `spacer_for_${layer_name}`, "", null, {});
                 spacer.draw = () => {};
                 spacer.computeSize = () => [0, 20];
-                spacer.onMouseDown = spacer.onClick = spacer.mouse = () => {};
             }
             
             this.addWidget("toggle", `enabled_${layer_name}`, props.enabled, (v) => { props.enabled = v; this.updatePropertiesJSON(); }, {label: `Layer ${layer_index} Enabled`});
             this.addWidget("combo", `blend_mode_${layer_name}`, props.blend_mode, (v) => { props.blend_mode = v; this.updatePropertiesJSON(); }, {values: BLEND_MODES});
             this.addWidget("number", `opacity_${layer_name}`, props.opacity, (v) => { props.opacity = v; this.updatePropertiesJSON(); }, {min: 0.0, max: 1.0, step: 0.1, precision: 2});
             
+            // --- SECTION COULEUR REPLIABLE (LOGIQUE CORRIGÉE) ---
+
+            // 1. Créer le bouton de bascule D'ABORD pour qu'il apparaisse en premier
+            const toggle_button = this.addWidget("toggle", `toggle_color_${layer_name}`, !props.color_section_collapsed, (v) => {
+                props.color_section_collapsed = !v;
+                updateColorWidgetsVisibility();
+                this.updatePropertiesJSON();
+            }, { on: "▼ Color Adjustments", off: "▶ Color Adjustments" });
+
+            // 2. Créer les widgets de couleur et les stocker dans une liste
+            const color_widgets = [
+                this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => { props.brightness = v; this.updatePropertiesJSON(); }, { label: "Luminosité", min: -1.0, max: 1.0, step: 0.1, precision: 2 }),
+                this.addWidget("number", `contrast_${layer_name}`, props.contrast, (v) => { props.contrast = v; this.updatePropertiesJSON(); }, { label: "Contraste", min: -1.0, max: 1.0, step: 0.1, precision: 2 }),
+                this.addWidget("number", `saturation_${layer_name}`, props.saturation, (v) => { props.saturation = v; this.updatePropertiesJSON(); }, { label: "Saturation", min: 0.0, max: 2.0, step: 0.1, precision: 2 }),
+                this.addWidget("number", `color_r_${layer_name}`, props.color_r, (v) => { props.color_r = v; this.updatePropertiesJSON(); }, { label: "R", min: 0.0, max: 2.0, step: 0.1, precision: 2 }),
+                this.addWidget("number", `color_g_${layer_name}`, props.color_g, (v) => { props.color_g = v; this.updatePropertiesJSON(); }, { label: "G", min: 0.0, max: 2.0, step: 0.1, precision: 2 }),
+                this.addWidget("number", `color_b_${layer_name}`, props.color_b, (v) => { props.color_b = v; this.updatePropertiesJSON(); }, { label: "B", min: 0.0, max: 2.0, step: 0.1, precision: 2 })
+            ];
+            
+            // 3. Stocker la taille originale de chaque widget
+            for (const w of color_widgets) {
+                w.originalComputeSize = w.computeSize;
+            }
+
+            // 4. Définir la fonction qui gère la visibilité ET la taille
+            const updateColorWidgetsVisibility = () => {
+                for (const w of color_widgets) {
+                    w.hidden = props.color_section_collapsed;
+                    w.computeSize = props.color_section_collapsed ? () => [0, -4] : w.originalComputeSize;
+                }
+                this.onResize?.(this.size);
+            };
+            updateColorWidgetsVisibility(); // Appel initial pour définir le bon état
+            
+            // --- FIN SECTION COULEUR ---
+
+            const mask_input_name = layer_name.replace("layer_", "mask_");
+            const mask_input = this.inputs.find(i => i.name === mask_input_name);
+            if (mask_input && mask_input.link !== null) {
+                this.addWidget("toggle", `invert_mask_${layer_name}`, !!props.invert_mask, (v) => { props.invert_mask = v; this.updatePropertiesJSON(); }, { label: "Invert Mask" });
+            }
+
             const resizeModeWidget = this.addWidget("combo", `resize_mode_${layer_name}`, props.resize_mode, () => {}, { values: RESIZE_MODES });
-            const scaleWidget = this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => { props.scale = v; this.updatePropertiesJSON(); }, { min: 0.0, max: 10.0, step: 0.1, precision: 2 });
+            const scaleWidget = this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => { props.scale = v; this.updatePropertiesJSON(); }, { min: 0.01, max: 10.0, step: 0.1, precision: 2 });
             const offsetXWidget = this.addWidget("number", `offset_x_${layer_name}`, props.offset_x, (v) => { props.offset_x = v; this.updatePropertiesJSON(); }, { min: -8192, max: 8192, step: 10 });
             const offsetYWidget = this.addWidget("number", `offset_y_${layer_name}`, props.offset_y, (v) => { props.offset_y = v; this.updatePropertiesJSON(); }, { min: -8192, max: 8192, step: 10 });
             
-            // --- MODIFICATION UNIQUE : DÉPLACEMENT DES BOUTONS ---
-            // Le bloc de code pour les boutons Up/Down est maintenant ici, à la fin.
+            scaleWidget.originalComputeSize = scaleWidget.computeSize;
+            offsetXWidget.originalComputeSize = offsetXWidget.computeSize;
+            offsetYWidget.originalComputeSize = offsetYWidget.computeSize;
+            
+            const updateTransformVisibility = (resize_mode) => {
+                const showTransformControls = (resize_mode === 'crop');
+                [scaleWidget, offsetXWidget, offsetYWidget].forEach(w => {
+                    w.hidden = !showTransformControls;
+                    w.computeSize = showTransformControls ? w.originalComputeSize : () => [0, -4];
+                });
+                this.onResize?.(this.size);
+            };
+
+            resizeModeWidget.callback = (v) => {
+                props.resize_mode = v;
+                updateTransformVisibility(v);
+                this.updatePropertiesJSON();
+            };
+            updateTransformVisibility(props.resize_mode);
+
             const up_button = this.addWidget("button", "Up", null, () => { this.moveLayer(layer_index, "up"); });
             const down_button = this.addWidget("button", "Down", null, () => { this.moveLayer(layer_index, "down"); });
             if (layer_index === 1) up_button.disabled = true;
             if (layer_index === total_layers) down_button.disabled = true;
-
-            scaleWidget.originalComputeSize = scaleWidget.computeSize;
-            offsetXWidget.originalComputeSize = offsetXWidget.computeSize;
-            offsetYWidget.originalComputeSize = offsetYWidget.computeSize;
-            const updateVisibility = (resize_mode) => {
-                const show = (resize_mode === 'crop');
-                [scaleWidget, offsetXWidget, offsetYWidget].forEach(w => {
-                    w.hidden = !show;
-                    w.computeSize = show ? w.originalComputeSize : () => [0, -4];
-                });
-                this.onResize?.(this.size);
-            };
-            resizeModeWidget.callback = (v) => {
-                props.resize_mode = v;
-                updateVisibility(v);
-                this.updatePropertiesJSON();
-            };
-            updateVisibility(props.resize_mode);
         };
         
         nodeType.prototype.updateLayerWidgets = function() {
