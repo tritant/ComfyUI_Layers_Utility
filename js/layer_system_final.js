@@ -109,7 +109,7 @@ app.registerExtension({
                     saturation: 1.0,
                     invert_mask: false,
                     color_section_collapsed: true,
-                    layer_collapsed: true, // État du calque principal
+                    layer_collapsed: false, // État du calque principal
                 };
             }
             const props = this.layer_properties[layer_name];
