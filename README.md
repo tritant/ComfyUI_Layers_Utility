@@ -32,6 +32,11 @@ The entire system is managed through a single node: **Layer System (Dynamic)**. 
 
 <img width="2387" height="1158" alt="Capture d'écran 2025-07-20 221503" src="https://github.com/user-attachments/assets/4f926a4c-8720-4904-ba68-b581972e4ce9" />
 
+<img width="2220" height="1167" alt="Capture d'écran 2025-07-22 024959" src="https://github.com/user-attachments/assets/60568c4e-7d72-44c8-b4cf-ca2fee33fa27" />
+
+
+
+
 
 
 This system allows for building complex, multi-element scenes in a dynamic and non-destructive way.
