@@ -19,14 +19,27 @@ def start_preview_server():
         class SecureHandler(http.server.SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=folder_paths.get_temp_directory(), **kwargs)
+
+            # --- AJOUT CRUCIAL ICI ---
+            # Cette méthode ajoute l'en-tête nécessaire pour autoriser le chargement des images
+            # par le script JavaScript du canvas.
+            def end_headers(self):
+                self.send_header('Access-Control-Allow-Origin', '*')
+                super().end_headers()
+            # --- FIN DE L'AJOUT ---
+
             def do_GET(self):
                 if self.path == '/' or self.path.endswith('/'):
                     self.send_error(403, "Directory listing is not allowed")
                     return
                 super().do_GET()
+
             def log_message(self, format, *args):
                 return
+
         address = ("127.0.0.1", PREVIEW_SERVER_PORT)
+        # Gestion de l'erreur "Address already in use"
+        socketserver.TCPServer.allow_reuse_address = True
         httpd = socketserver.TCPServer(address, SecureHandler)
         thread = threading.Thread(target=httpd.serve_forever)
         thread.daemon = True
@@ -36,7 +49,7 @@ def start_preview_server():
 # --- FIN DE LA LOGIQUE DU SERVEUR D'APERÇU ---
 
 
-# +++ FONCTION HELPER (INCHANGÉE) +++
+# Le reste du fichier Python est inchangé
 def prepare_layer(top_image, base_image, resize_mode, scale, offset_x, offset_y):
     B, base_H, base_W, C = base_image.shape
     top_C = top_image.shape[3] if top_image.dim() > 3 else 1
