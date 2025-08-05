@@ -1,23 +1,52 @@
 import torch
 import torch.nn.functional as F
 import json
+import numpy as np
+import folder_paths
+from PIL import Image
+import os
+import http.server
+import socketserver
+import threading
+
+# --- DÉBUT DE LA LOGIQUE DU SERVEUR D'APERÇU ---
+preview_server_thread = None
+PREVIEW_SERVER_PORT = 8189 # Port pour notre serveur
+
+def start_preview_server():
+    global preview_server_thread
+    if preview_server_thread is None or not preview_server_thread.is_alive():
+        class SecureHandler(http.server.SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=folder_paths.get_temp_directory(), **kwargs)
+            def do_GET(self):
+                if self.path == '/' or self.path.endswith('/'):
+                    self.send_error(403, "Directory listing is not allowed")
+                    return
+                super().do_GET()
+            def log_message(self, format, *args):
+                return
+        address = ("127.0.0.1", PREVIEW_SERVER_PORT)
+        httpd = socketserver.TCPServer(address, SecureHandler)
+        thread = threading.Thread(target=httpd.serve_forever)
+        thread.daemon = True
+        thread.start()
+        preview_server_thread = thread
+        print(f"\n[Layer System] INFO: Démarrage du serveur d'aperçu local sur http://127.0.0.1:{PREVIEW_SERVER_PORT}")
+# --- FIN DE LA LOGIQUE DU SERVEUR D'APERÇU ---
+
 
 # +++ FONCTION HELPER (INCHANGÉE) +++
 def prepare_layer(top_image, base_image, resize_mode, scale, offset_x, offset_y):
-    """Prépare un calque (image ou masque) en le redimensionnant et en le positionnant."""
     B, base_H, base_W, C = base_image.shape
     top_C = top_image.shape[3] if top_image.dim() > 3 else 1
-    
     _, top_H, top_W, _ = top_image.shape
-
     if scale != 1.0:
         new_H, new_W = int(top_H * scale), int(top_W * scale)
         if new_H > 0 and new_W > 0:
             top_image = F.interpolate(top_image.permute(0, 3, 1, 2), size=(new_H, new_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
             top_H, top_W = new_H, new_W
-
     canvas = torch.zeros(B, base_H, base_W, top_C, device=base_image.device)
-    
     if resize_mode == 'stretch':
         return F.interpolate(top_image.permute(0, 3, 1, 2), size=(base_H, base_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
     elif resize_mode == 'fit':
@@ -50,6 +79,8 @@ def prepare_layer(top_image, base_image, resize_mode, scale, offset_x, offset_y)
 
 
 class LayerSystem:
+    OUTPUT_NODE = True
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -58,6 +89,7 @@ class LayerSystem:
             },
             "optional": {
                 "_properties_json": ("STRING", {"multiline": True, "default": "{}"}),
+                "_preview_anchor": ("STRING", {"multiline": True, "default": "PREVIEW_ANCHOR"}),
             }
         }
 
@@ -65,9 +97,15 @@ class LayerSystem:
     FUNCTION = "composite_layers"
     CATEGORY = "Layer System"
     DESCRIPTION = "This custom node for ComfyUI provides a powerful and flexible dynamic layering system, similar to what you would find in image editing software like Photoshop."
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("NaN")
     
+    def tensor_to_pil(self, tensor):
+        return Image.fromarray(np.clip(255. * tensor.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
+
     def _blend(self, base, top, mode):
-        """Applique un mode de fusion entre deux images."""
         if mode == 'normal': return top
         if mode == 'multiply': return base * top
         if mode == 'screen': return 1.0 - (1.0 - base) * (1.0 - top)
@@ -83,45 +121,49 @@ class LayerSystem:
         return top
 
     def composite_layers(self, base_image, _properties_json="{}", **kwargs):
+        start_preview_server()
         final_image = base_image.clone()
+        previews_data = {}
+        temp_dir = folder_paths.get_temp_directory()
         
+        base_pil = self.tensor_to_pil(base_image)
+        base_filename = "layersys_base.png"
+        base_pil.save(os.path.join(temp_dir, base_filename))
+        previews_data["base_image"] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{base_filename}"
+
         if final_image.shape[-1] == 4:
             final_image = final_image[..., :3]
 
         properties = json.loads(_properties_json)
-        
         layers = {k: v for k, v in kwargs.items() if k.startswith("layer_")}
         masks = {k: v for k, v in kwargs.items() if k.startswith("mask_")}
-        
         sorted_layer_names = sorted(layers.keys())
 
         for layer_name in sorted_layer_names:
             layer_image = layers.get(layer_name)
             if layer_image is None: continue
 
+            layer_pil = self.tensor_to_pil(layer_image)
+            layer_filename = f"layersys_{layer_name}.png"
+            layer_pil.save(os.path.join(temp_dir, layer_filename))
+            previews_data[layer_name] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{layer_filename}"
+
             if layer_image.shape[-1] == 4:
                 layer_image = layer_image[..., :3]
-
             props = properties.get(layer_name, {})
             if not props.get("enabled", True): continue
-            
             resize_mode = props.get("resize_mode", "fit")
             scale = props.get("scale", 1.0)
             offset_x = props.get("offset_x", 0)
             offset_y = props.get("offset_y", 0)
-            
             prepared_layer = prepare_layer(layer_image, final_image, resize_mode, scale, offset_x, offset_y)
-
-            # Appliquer les ajustements de couleur
             brightness = props.get("brightness", 0.0)
             if brightness != 0.0:
                 prepared_layer = torch.clamp(prepared_layer + brightness, 0.0, 1.0)
-
             contrast = props.get("contrast", 0.0)
             if contrast != 0.0:
                 contrast_factor = 1.0 + contrast
                 prepared_layer = torch.clamp((prepared_layer - 0.5) * contrast_factor + 0.5, 0.0, 1.0)
-
             color_r = props.get("color_r", 1.0)
             color_g = props.get("color_g", 1.0)
             color_b = props.get("color_b", 1.0)
@@ -129,42 +171,33 @@ class LayerSystem:
                 prepared_layer[..., 0] = torch.clamp(prepared_layer[..., 0] * color_r, 0.0, 1.0)
                 prepared_layer[..., 1] = torch.clamp(prepared_layer[..., 1] * color_g, 0.0, 1.0)
                 prepared_layer[..., 2] = torch.clamp(prepared_layer[..., 2] * color_b, 0.0, 1.0)
-
-            # --- NOUVELLE FONCTIONNALITÉ : SATURATION ---
             saturation = props.get("saturation", 1.0)
             if saturation != 1.0:
                 grayscale = prepared_layer[..., 0] * 0.299 + prepared_layer[..., 1] * 0.587 + prepared_layer[..., 2] * 0.114
-                grayscale = grayscale.unsqueeze(-1) # Garder la dimension du canal
+                grayscale = grayscale.unsqueeze(-1)
                 prepared_layer = torch.clamp(grayscale * (1.0 - saturation) + prepared_layer * saturation, 0.0, 1.0)
-
             mode = props.get("blend_mode", "normal")
             opacity = props.get("opacity", 1.0)
-            
             blended_image = self._blend(final_image, prepared_layer, mode)
             composited_image = (1.0 - opacity) * final_image + opacity * blended_image
-            
             mask_name = layer_name.replace("layer_", "mask_")
             mask = masks.get(mask_name)
-
             if mask is not None:
                 if mask.dim() == 3:
                     mask = mask.unsqueeze(-1)
-                
                 prepared_mask = prepare_layer(mask, final_image, resize_mode, scale, offset_x, offset_y)
-
                 if props.get("invert_mask", False):
                     prepared_mask = 1.0 - prepared_mask
-
                 final_image = final_image * (1.0 - prepared_mask) + composited_image * prepared_mask
             else:
                 final_image = composited_image
 
-        return (final_image,)
+        return {
+            "result": (final_image,),
+            "ui": {
+                "layer_previews": [previews_data]
+            }
+        }
 
-
-NODE_CLASS_MAPPINGS = {
-    "LayerSystem": LayerSystem,
-}
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "LayerSystem": "Layer System (Dynamic)"
-}
+NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem, }
+NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layer System (Dynamic)" }
