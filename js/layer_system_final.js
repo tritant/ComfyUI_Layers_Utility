@@ -13,12 +13,263 @@ app.registerExtension({
 
         const resizeHeight = function() {
             if (!this.size) return;
+            
+            const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
+            
+            if (anchorWidget && this.basePreviewImage) {
+                const aspectRatio = this.basePreviewImage.naturalHeight / this.basePreviewImage.naturalWidth;
+                const contentWidth = this.size[0] - 20;
+                anchorWidget.computeSize = () => [this.size[0], contentWidth * aspectRatio];
+            }
+
             const newSize = this.computeSize();
             this.size[1] = newSize[1]; 
             this.onResize?.(this.size);
             this.graph.setDirtyCanvas(true, true);
+            
+            if (anchorWidget?.computeSize) {
+                delete anchorWidget.computeSize;
+            }
         };
 
+        const onExecuted = nodeType.prototype.onExecuted;
+        nodeType.prototype.onExecuted = function(message) {
+            onExecuted?.apply(this, arguments);
+            
+            if (message?.layer_previews && message.layer_previews[0]) {
+                const previewData = message.layer_previews[0];
+                this.preview_data = previewData;
+                
+                const imagePromises = Object.entries(previewData).map(([name, url]) => {
+                    return new Promise((resolve, reject) => {
+                        const img = new Image();
+                        img.src = url + `?t=${Date.now()}`;
+                        img.onload = () => resolve({ name, img });
+                        img.onerror = reject;
+                    });
+                });
+
+                Promise.all(imagePromises)
+                    .then(loadedImages => {
+                        this.loaded_preview_images = loadedImages.reduce((acc, {name, img}) => {
+                            acc[name] = img;
+                            return acc;
+                        }, {});
+
+                        this.basePreviewImage = this.loaded_preview_images.base_image;
+                        resizeHeight.call(this);
+                        this.redrawPreviewCanvas();
+                    })
+                    .catch(e => console.error("Erreur lors du chargement des images d'aperçu:", e));
+            }
+        };
+
+        const onNodeCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function () {
+            onNodeCreated?.apply(this, arguments);
+            
+            if (!this.layer_properties) { this.layer_properties = {}; }
+            this.basePreviewImage = null;
+            this.preview_data = {};
+            this.loaded_preview_images = {};
+            this.redraw_req = null;
+            this.previewCanvasScale = 1.0;
+
+            this.movingLayer = null;
+            this.isDragging = false;
+            this.dragStart = { x: 0, y: 0 };
+            this.initialOffsets = { x: 0, y: 0 };
+
+            setTimeout(() => {
+                const p_widget = this.widgets.find(w => w.name === "_properties_json");
+                if(p_widget) {
+                    p_widget.hidden = true;
+                    p_widget.computeSize = () => [0, -4];
+                }
+                
+                const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
+                if (anchorWidget && anchorWidget.inputEl) {
+                    const canvas = document.createElement("canvas");
+                    const container = anchorWidget.inputEl.parentElement;
+                    container.style.padding = "0px";
+                    container.style.margin = "0px";
+                    container.replaceChild(canvas, anchorWidget.inputEl);
+                    this.previewCanvas = canvas;
+                    this.previewCtx = canvas.getContext("2d");
+                    const anchorIndex = this.widgets.indexOf(anchorWidget);
+                    if (anchorIndex > 0) {
+                       this.widgets.splice(anchorIndex, 1);
+                       this.widgets.unshift(anchorWidget);
+                    }
+                    this.redrawPreviewCanvas();
+                    
+                    this.previewCanvas.addEventListener('mousedown', this.onCanvasMouseDown.bind(this));
+                    this.previewCanvas.addEventListener('mousemove', this.onCanvasMouseMove.bind(this));
+                    this.previewCanvas.addEventListener('mouseup', this.onCanvasMouseUp.bind(this));
+                    this.previewCanvas.addEventListener('mouseleave', this.onCanvasMouseLeave.bind(this));
+                }
+                this.refreshUI();
+            }, 0);
+        };
+        
+        const onResize = nodeType.prototype.onResize;
+        nodeType.prototype.onResize = function(size) {
+            onResize?.apply(this, arguments);
+            if (this.previewCanvas) {
+                if (this.redraw_req) cancelAnimationFrame(this.redraw_req);
+                this.redraw_req = requestAnimationFrame(() => {
+                    this.redrawPreviewCanvas();
+                    this.redraw_req = null;
+                });
+            }
+        };
+
+        nodeType.prototype.onCanvasMouseDown = function(e) {
+            if (!this.movingLayer) return;
+            const props = this.layer_properties[this.movingLayer];
+            if (!props) return;
+            this.isDragging = true;
+            this.dragStart = { x: e.clientX, y: e.clientY };
+            this.initialOffsets = { x: props.offset_x, y: props.offset_y };
+            e.preventDefault();
+            e.stopPropagation();
+        };
+
+        nodeType.prototype.onCanvasMouseMove = function(e) {
+            if (!this.isDragging || !this.movingLayer) return;
+            const props = this.layer_properties[this.movingLayer];
+            const baseImg = this.basePreviewImage;
+            if (!props || !baseImg) return;
+            const canvas = this.previewCanvas;
+            const imgRatio = baseImg.naturalWidth / baseImg.naturalHeight;
+            const canvasRatio = canvas.width / canvas.height;
+            let destWidth;
+            if (imgRatio > canvasRatio) {
+                destWidth = canvas.width;
+            } else {
+                destWidth = canvas.height * imgRatio;
+            }
+            // Sécurité pour éviter la division par zéro si destWidth est nul
+            if (destWidth === 0) return;
+            const scaleFactor = baseImg.naturalWidth / destWidth;
+            const dx = e.clientX - this.dragStart.x;
+            const dy = e.clientY - this.dragStart.y;
+            props.offset_x = Math.round(this.initialOffsets.x + (dx * scaleFactor));
+            props.offset_y = Math.round(this.initialOffsets.y + (dy * scaleFactor));
+            const offsetXWidget = this.widgets.find(w => w.name === `offset_x_${this.movingLayer}`);
+            const offsetYWidget = this.widgets.find(w => w.name === `offset_y_${this.movingLayer}`);
+            if (offsetXWidget) offsetXWidget.value = props.offset_x;
+            if (offsetYWidget) offsetYWidget.value = props.offset_y;
+            this.redrawPreviewCanvas();
+        };
+
+        nodeType.prototype.onCanvasMouseUp = function(e) {
+            if (this.isDragging) {
+                this.isDragging = false;
+                this.updatePropertiesJSON();
+            }
+        };
+        
+        nodeType.prototype.onCanvasMouseLeave = function(e) {
+            if (this.isDragging) {
+                 this.isDragging = false;
+                 this.updatePropertiesJSON();
+            }
+        };
+
+        nodeType.prototype.redrawPreviewCanvas = function() {
+            if (!this.previewCanvas) return;
+            const canvas = this.previewCanvas;
+            const ctx = this.previewCtx;
+            const rect = canvas.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            if (canvas.width !== rect.width || canvas.height !== rect.height) {
+                canvas.width = rect.width;
+                canvas.height = rect.height;
+            }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (this.basePreviewImage && this.basePreviewImage.naturalWidth > 0) {
+                const img = this.basePreviewImage;
+                const imgRatio = img.naturalWidth / img.naturalHeight;
+                const canvasRatio = canvas.width / canvas.height;
+                let destWidth, destHeight, destX, destY;
+                if (imgRatio > canvasRatio) {
+                    destWidth = canvas.width; destHeight = canvas.width / imgRatio;
+                    destX = 0; destY = (canvas.height - destHeight) / 2;
+                } else {
+                    destHeight = canvas.height; destWidth = canvas.height * imgRatio;
+                    destY = 0; destX = (canvas.width - destWidth) / 2;
+                }
+                ctx.drawImage(img, destX, destY, destWidth, destHeight);
+                this.previewCanvasScale = destWidth / this.basePreviewImage.naturalWidth;
+
+                const sortedLayerNames = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).map(i => i.name);
+                
+                for (const layerName of sortedLayerNames) {
+                    const props = this.layer_properties[layerName];
+                    const layerImage = this.loaded_preview_images[layerName];
+
+                    if (!props || !props.enabled || !layerImage || !layerImage.naturalWidth || !layerImage.naturalHeight) {
+                        continue;
+                    }
+
+                    ctx.save();
+                    ctx.globalAlpha = props.opacity;
+                    ctx.globalCompositeOperation = props.blend_mode === 'normal' ? 'source-over' : props.blend_mode;
+                    
+                    let final_sx = 0, final_sy = 0, final_sw = layerImage.naturalWidth, final_sh = layerImage.naturalHeight;
+                    let final_dx = destX, final_dy = destY, final_dw = destWidth, final_dh = destHeight;
+
+                    // --- LA SEULE MODIFICATION EST ICI ---
+                    // Logique spécifique pour chaque mode, maintenant synchronisée avec le Python
+                    if (props.resize_mode === 'crop') {
+                        final_dx = destX + (props.offset_x * this.previewCanvasScale);
+                        final_dy = destY + (props.offset_y * this.previewCanvasScale);
+                        final_dw = final_sw * props.scale * this.previewCanvasScale;
+                        final_dh = final_sh * props.scale * this.previewCanvasScale;
+					} else { // Logique pour les autres modes qui ne change pas
+                        const layerRatio = layerImage.naturalWidth / layerImage.naturalHeight;
+                        const destContainerRatio = destWidth / destHeight;
+                        switch(props.resize_mode) {
+                            case 'fit':
+                                if (layerRatio > destContainerRatio) {
+                                    final_dh = final_dw / layerRatio;
+                                    final_dy += (destHeight - final_dh) / 2;
+                                } else {
+                                    final_dw = final_dh * layerRatio;
+                                    final_dx += (destWidth - final_dw) / 2;
+                                }
+                                break;
+                            case 'cover':
+                                if (layerRatio > destContainerRatio) {
+                                    final_sw = final_sh * destContainerRatio;
+                                    final_sx = (layerImage.naturalWidth - final_sw) / 2;
+                                } else {
+                                    final_sh = final_sw / destContainerRatio;
+                                    final_sy = (layerImage.naturalHeight - final_sh) / 2;
+                                }
+                                break;
+                            case 'stretch':
+                            default:
+                                break;
+                        }
+                    }
+                    
+                    ctx.drawImage(layerImage, final_sx, final_sy, final_sw, final_sh, final_dx, final_dy, final_dw, final_dh);
+                    
+                    if (this.movingLayer === layerName) {
+                        ctx.strokeStyle = "red";
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(final_dx, final_dy, final_dw, final_dh);
+                    }
+                    ctx.restore();
+                }
+            }
+        };
+        
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (info) {
             onConfigure?.apply(this, arguments);
@@ -30,18 +281,6 @@ app.registerExtension({
                     catch (e) { this.layer_properties = {}; }
                 }
             }
-        };
-
-        const onNodeCreated = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function () {
-            onNodeCreated?.apply(this, arguments);
-            if (!this.layer_properties) { this.layer_properties = {}; }
-            const p_widget = this.widgets.find(w => w.name === "_properties_json");
-            if (p_widget) {
-                p_widget.inputEl.style.display = "none";
-                p_widget.computeSize = () => [0, -4];
-            }
-            setTimeout(() => this.refreshUI(), 0);
         };
         
         const onConnectionsChange = nodeType.prototype.onConnectionsChange;
@@ -77,26 +316,34 @@ app.registerExtension({
             const name_B = `layer_${swap_index}`;
             const mask_name_A = name_A.replace("layer_", "mask_");
             const mask_name_B = name_B.replace("layer_", "mask_");
-
-            const props_A = this.layer_properties[name_A];
-            this.layer_properties[name_A] = this.layer_properties[name_B];
-            this.layer_properties[name_B] = props_A;
-            
+        
             const input_A = this.inputs.find(i => i.name === name_A);
             const input_B = this.inputs.find(i => i.name === name_B);
             const mask_input_A = this.inputs.find(i => i.name === mask_name_A);
             const mask_input_B = this.inputs.find(i => i.name === mask_name_B);
-
+        
+            if (!input_A || !input_B) return;
+        
             [input_A.link, input_B.link] = [input_B.link, input_A.link];
-            [mask_input_A.link, mask_input_B.link] = [mask_input_B.link, mask_input_A.link];
-
-            if (this.graph.links[input_A.link]) this.graph.links[input_A.link].target_slot = this.inputs.indexOf(input_A);
-            if (this.graph.links[input_B.link]) this.graph.links[input_B.link].target_slot = this.inputs.indexOf(input_B);
-            if (this.graph.links[mask_input_A.link]) this.graph.links[mask_input_A.link].target_slot = this.inputs.indexOf(mask_input_A);
-            if (this.graph.links[mask_input_B.link]) this.graph.links[mask_input_B.link].target_slot = this.inputs.indexOf(mask_input_B);
-
+            if (mask_input_A && mask_input_B) {
+                [mask_input_A.link, mask_input_B.link] = [mask_input_B.link, mask_input_A.link];
+            }
+        
+            const props_A = this.layer_properties[name_A];
+            this.layer_properties[name_A] = this.layer_properties[name_B];
+            this.layer_properties[name_B] = props_A;
+        
+            const img_A = this.loaded_preview_images[name_A];
+            this.loaded_preview_images[name_A] = this.loaded_preview_images[name_B];
+            this.loaded_preview_images[name_B] = img_A;
+        
+            if (input_A.link !== null) this.graph.links[input_A.link].target_slot = this.inputs.indexOf(input_A);
+            if (input_B.link !== null) this.graph.links[input_B.link].target_slot = this.inputs.indexOf(input_B);
+            if (mask_input_A && mask_input_A.link !== null) this.graph.links[mask_input_A.link].target_slot = this.inputs.indexOf(mask_input_A);
+            if (mask_input_B && mask_input_B.link !== null) this.graph.links[mask_input_B.link].target_slot = this.inputs.indexOf(mask_input_B);
+        
             this.refreshUI();
-            this.graph.setDirtyCanvas(true, true);
+            this.redrawPreviewCanvas();
         };
 
         nodeType.prototype.addLayerWidgets = function(layer_name) {
@@ -104,46 +351,36 @@ app.registerExtension({
                 this.layer_properties[layer_name] = {
                     blend_mode: "normal", opacity: 1.0, enabled: true,
                     resize_mode: "fit", scale: 1.0, offset_x: 0, offset_y: 0,
-                    brightness: 0.0, contrast: 0.0,
-                    color_r: 1.0, color_g: 1.0, color_b: 1.0,
-                    saturation: 1.0,
-                    invert_mask: false,
-                    color_section_collapsed: true,
-                    layer_collapsed: false, // État du calque principal
+                    brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0,
+                    saturation: 1.0, invert_mask: false, color_section_collapsed: true, layer_collapsed: false,
                 };
             }
             const props = this.layer_properties[layer_name];
             const layer_index = parseInt(layer_name.split("_")[1]);
             const total_layers = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).length;
-
             if (layer_index > 1) {
                 const spacer = this.addWidget("text", `spacer_for_${layer_name}`, "", null, {});
                 spacer.draw = () => {};
                 spacer.computeSize = () => [0, 20];
             }
             
-            // --- SECTION PRINCIPALE REPLIABLE ---
             const layerToggle = this.addWidget("toggle", `toggle_layer_${layer_name}`, !props.layer_collapsed, (v) => {
                 props.layer_collapsed = !v;
                 updateVisibility();
                 this.updatePropertiesJSON();
             }, { on: `▼ Layer ${layer_index} Settings`, off: `▶ Layer ${layer_index} Settings` });
-
             const collapsibleWidgets = [];
             const colorWidgets = [];
-
-            // Création des widgets et ajout à la liste des éléments repliables
-            collapsibleWidgets.push(this.addWidget("toggle", `enabled_${layer_name}`, props.enabled, (v) => { props.enabled = v; this.updatePropertiesJSON(); }, {label: `Layer ${layer_index} Enabled`}));
-            collapsibleWidgets.push(this.addWidget("combo", `blend_mode_${layer_name}`, props.blend_mode, (v) => { props.blend_mode = v; this.updatePropertiesJSON(); }, {values: BLEND_MODES}));
-            collapsibleWidgets.push(this.addWidget("number", `opacity_${layer_name}`, props.opacity, (v) => { props.opacity = v; this.updatePropertiesJSON(); }, {min: 0.0, max: 1.0, step: 0.1, precision: 2}));
-            
+            const transformWidgets = [];
+            collapsibleWidgets.push(this.addWidget("toggle", `enabled_${layer_name}`, props.enabled, (v) => { props.enabled = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); }, {label: `Enabled`}));
+            collapsibleWidgets.push(this.addWidget("combo", `blend_mode_${layer_name}`, props.blend_mode, (v) => { props.blend_mode = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); }, {values: BLEND_MODES}));
+            collapsibleWidgets.push(this.addWidget("number", `opacity_${layer_name}`, props.opacity, (v) => { props.opacity = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); }, {min: 0.0, max: 1.0, step: 0.1, precision: 2}));
             const colorToggle = this.addWidget("toggle", `toggle_color_${layer_name}`, !props.color_section_collapsed, (v) => {
                 props.color_section_collapsed = !v;
                 updateVisibility();
                 this.updatePropertiesJSON();
-            }, { on: "▼ Color Adjustments", off: "▶ Color Adjustments" });
+            }, { on: "▼ Color Adjust", off: "▶ Color Adjust" });
             collapsibleWidgets.push(colorToggle);
-
             colorWidgets.push(this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => { props.brightness = v; this.updatePropertiesJSON(); }, { label: "Brightness", min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
             colorWidgets.push(this.addWidget("number", `contrast_${layer_name}`, props.contrast, (v) => { props.contrast = v; this.updatePropertiesJSON(); }, { label: "Contrast", min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
             colorWidgets.push(this.addWidget("number", `saturation_${layer_name}`, props.saturation, (v) => { props.saturation = v; this.updatePropertiesJSON(); }, { label: "Saturation", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
@@ -151,79 +388,96 @@ app.registerExtension({
             colorWidgets.push(this.addWidget("number", `color_g_${layer_name}`, props.color_g, (v) => { props.color_g = v; this.updatePropertiesJSON(); }, { label: "G", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
             colorWidgets.push(this.addWidget("number", `color_b_${layer_name}`, props.color_b, (v) => { props.color_b = v; this.updatePropertiesJSON(); }, { label: "B", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
             collapsibleWidgets.push(...colorWidgets);
-            
             const mask_input_name = layer_name.replace("layer_", "mask_");
             const mask_input = this.inputs.find(i => i.name === mask_input_name);
             if (mask_input && mask_input.link !== null) {
                 collapsibleWidgets.push(this.addWidget("toggle", `invert_mask_${layer_name}`, !!props.invert_mask, (v) => { props.invert_mask = v; this.updatePropertiesJSON(); }, { label: "Invert Mask" }));
             }
-
-            collapsibleWidgets.push(this.addWidget("combo", `resize_mode_${layer_name}`, props.resize_mode, (v) => {
+            
+            const resizeModeWidget = this.addWidget("combo", `resize_mode_${layer_name}`, props.resize_mode, (v) => {
                 props.resize_mode = v;
-                updateVisibility(); // Mettre à jour la visibilité des contrôles de transformation
+                if (v !== 'crop' && this.movingLayer === layer_name) {
+                    this.movingLayer = null;
+                }
+                updateVisibility();
                 this.updatePropertiesJSON();
-            }, { values: RESIZE_MODES }));
+                this.redrawPreviewCanvas();
+            }, { values: RESIZE_MODES });
+            collapsibleWidgets.push(resizeModeWidget);
 
-            const transformWidgets = [
-                this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => { props.scale = v; this.updatePropertiesJSON(); }, { min: 0.01, max: 10.0, step: 0.1, precision: 2 }),
-                this.addWidget("number", `offset_x_${layer_name}`, props.offset_x, (v) => { props.offset_x = v; this.updatePropertiesJSON(); }, { min: -8192, max: 8192, step: 10 }),
-                this.addWidget("number", `offset_y_${layer_name}`, props.offset_y, (v) => { props.offset_y = v; this.updatePropertiesJSON(); }, { min: -8192, max: 8192, step: 10 })
-            ];
+            transformWidgets.push(this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => { 
+                props.scale = v; 
+                this.updatePropertiesJSON(); 
+                this.redrawPreviewCanvas();
+            }, { min: 0.01, max: 10.0, step: 0.1, precision: 2 }));
+            
+            transformWidgets.push(this.addWidget("number", `offset_x_${layer_name}`, props.offset_x, (v) => { props.offset_x = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); }, { min: -8192, max: 8192, step: 1 }));
+            transformWidgets.push(this.addWidget("number", `offset_y_${layer_name}`, props.offset_y, (v) => { props.offset_y = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); }, { min: -8192, max: 8192, step: 1 }));
             collapsibleWidgets.push(...transformWidgets);
-
-            // Sauvegarder la taille originale pour tous les widgets repliables
-            for (const w of collapsibleWidgets) {
-                w.originalComputeSize = w.computeSize;
-            }
-
-            // Les boutons Up/Down ne sont PAS repliables
+            
             const up_button = this.addWidget("button", "Up", null, () => { this.moveLayer(layer_index, "up"); });
             const down_button = this.addWidget("button", "Down", null, () => { this.moveLayer(layer_index, "down"); });
-            if (layer_index === 1) up_button.disabled = true;
-            if (layer_index === total_layers) down_button.disabled = true;
             
-            // --- LOGIQUE DE VISIBILITÉ ---
+            const move_button = this.addWidget("button", "Move Calque", `move_btn_${layer_name}`, () => {
+                if (this.movingLayer === layer_name) {
+                    this.movingLayer = null;
+                    move_button.name = "Move Calque";
+                } else {
+                    if (this.movingLayer) {
+                        const old_button = this.widgets.find(w => w.name === `move_btn_${this.movingLayer}`);
+                        if (old_button) old_button.name = "Move Calque";
+                    }
+                    this.movingLayer = layer_name;
+                    move_button.name = "STOP";
+                }
+                this.redrawPreviewCanvas();
+            });
+            if (this.movingLayer === layer_name) {
+                move_button.name = "STOP";
+            }
+            
+            for (const w of [...collapsibleWidgets, up_button, down_button, move_button]) { 
+                w.originalComputeSize = w.computeSize; 
+            }
+
+            if (layer_index <= 1) up_button.disabled = true;
+            if (layer_index >= total_layers) down_button.disabled = true;
+            
             const updateVisibility = () => {
                 const isLayerCollapsed = props.layer_collapsed;
                 const isColorCollapsed = props.color_section_collapsed;
-                const showTransformControls = props.resize_mode === 'crop';
-
+                const showTransformForCrop = props.resize_mode === 'crop';
+                
                 for(const w of collapsibleWidgets) {
                     let isHidden = isLayerCollapsed;
+                    if (colorWidgets.includes(w)) { isHidden = isLayerCollapsed || isColorCollapsed; }
+                    if (w === colorToggle) { isHidden = isLayerCollapsed; }
 
-                    // Logique pour la section couleur
-                    if (colorWidgets.includes(w)) {
-                        isHidden = isLayerCollapsed || isColorCollapsed;
+                    if (w.name.startsWith("scale_") || w.name.startsWith("offset_")) { 
+                        isHidden = isLayerCollapsed || !showTransformForCrop;
                     }
-                    if (w === colorToggle) {
-                        isHidden = isLayerCollapsed;
-                    }
-                    
-                    // Logique pour la section transformation
-                    if (transformWidgets.includes(w)) {
-                        isHidden = isLayerCollapsed || !showTransformControls;
-                    }
-
                     w.hidden = isHidden;
                     w.computeSize = isHidden ? () => [0, -4] : w.originalComputeSize;
                 }
+
+                const showMoveButton = showTransformForCrop && !isLayerCollapsed;
+                move_button.hidden = !showMoveButton;
+                move_button.computeSize = !showMoveButton ? () => [0, -4] : move_button.originalComputeSize;
+
                 resizeHeight.call(this);
             };
-
-            updateVisibility(); // Appel initial
+            updateVisibility();
         };
         
         nodeType.prototype.updateLayerWidgets = function() {
-            this.widgets = this.widgets.filter(w => w.name === "_properties_json");
+            this.widgets = this.widgets.filter(w => w.name === "_properties_json" || w.name === "_preview_anchor");
             const connectedInputs = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null);
             connectedInputs.sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1]));
             for (const input of connectedInputs) { this.addLayerWidgets(input.name); }
             resizeHeight.call(this);
         };
-
         nodeType.prototype.handleDisconnectedInputs = function() {
             const connected_layer_names = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
-            
             const inputs_to_remove = [];
             const props_to_remove = [];
             for (const key in this.layer_properties) {
@@ -236,37 +490,30 @@ app.registerExtension({
                 }
             }
             props_to_remove.forEach(key => delete this.layer_properties[key]);
-            inputs_to_remove.forEach(i => this.removeInput(this.inputs.indexOf(i)));
-            
+            inputs_to_remove.sort((a,b) => this.inputs.indexOf(b) - this.inputs.indexOf(a)).forEach(i => this.removeInput(this.inputs.indexOf(i)));
             const new_props = {};
             const remaining_layers = this.inputs.filter(i => i.name.startsWith("layer_"));
             const remaining_masks = this.inputs.filter(i => i.name.startsWith("mask_"));
-
-            remaining_layers.sort((a,b)=>a.name.localeCompare(b.name)).forEach((input, i) => {
+            remaining_layers.sort((a,b)=> parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).forEach((input, i) => {
                 const old_name = input.name;
                 const new_name = `layer_${i + 1}`;
                 if(this.layer_properties[old_name]) new_props[new_name] = this.layer_properties[old_name];
-                
                 const old_mask_name = old_name.replace("layer_", "mask_");
                 const mask_input = remaining_masks.find(m => m.name === old_mask_name);
                 if(mask_input) mask_input.name = new_name.replace("layer_", "mask_");
-                
                 input.name = new_name;
             });
             this.layer_properties = new_props;
         };
-
         nodeType.prototype.ensureWildcardInputs = function () {
             const layerInputs = this.inputs.filter(i => i.name.startsWith("layer_"));
-            const lastLayerInput = layerInputs[layerInputs.length - 1];
-
+            const lastLayerInput = layerInputs.sort((a,b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).pop();
             if (!lastLayerInput || lastLayerInput.link !== null) {
-                const newIndex = layerInputs.length + 1;
+                const newIndex = lastLayerInput ? parseInt(lastLayerInput.name.split("_")[1]) + 1 : 1;
                 this.addInput(`layer_${newIndex}`, ["IMAGE", "MASK", "*"]);
                 this.addInput(`mask_${newIndex}`, "MASK");
             }
         };
-
         nodeType.prototype.updatePropertiesJSON = function() { const p = this.widgets.find(w => w.name === "_properties_json"); if (p) { p.value = JSON.stringify(this.layer_properties); } };
     },
 });
