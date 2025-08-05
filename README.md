@@ -1,10 +1,15 @@
 # 겹 Layer System (Dynamic) for ComfyUI
 
-This custom node for ComfyUI provides a powerful and flexible dynamic layering system, similar to what you would find in image editing software like Photoshop. It allows you to stack multiple images and masks, control blending modes, opacity, and transformations for each layer individually. Real-time preview(beta), position your layers with the mouse
+This custom node for ComfyUI provides a powerful and flexible dynamic layering system, similar to what you would find in image editing software like Photoshop. It allows you to stack multiple images and masks, control blending modes, opacity, and transformations for each layer individually. Real-time preview(beta), position your layers with the mouse.
 
 This system is built to be intuitive, enabling complex composites directly within your workflow.
 
 -----
+
+
+https://github.com/user-attachments/assets/1f7dddd2-d6bb-4255-bea3-b4fcef8fc3a0
+
+
 
 ## 🎛️ Node Parameters
 
