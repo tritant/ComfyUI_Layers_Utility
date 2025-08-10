@@ -5,9 +5,8 @@ This custom node for ComfyUI provides a powerful and flexible dynamic layering s
 This system is built to be intuitive, enabling complex composites directly within your workflow.
 
 -----
+<img width="2557" height="1235" alt="Capture d'écran 2025-08-10 021011" src="https://github.com/user-attachments/assets/e319a062-5948-47a4-b88d-d8bd348fad95" />
 
-
-https://github.com/user-attachments/assets/1f7dddd2-d6bb-4255-bea3-b4fcef8fc3a0
 
 
 
@@ -33,15 +32,6 @@ The entire system is managed through a single node: **Layer System (Dynamic)**. 
 | **scale** | Number | Scales the layer (visible only in `crop` mode). |
 | **offset_x / offset_y** | Number | Controls the X and Y position of the layer (visible only in `crop` mode). |
 -----
-<img width="2411" height="1158" alt="Capture d'écran 2025-07-20 152255" src="https://github.com/user-attachments/assets/bf77959e-2db6-49db-be49-dbb83bf12fbd" />
-
-<img width="2387" height="1158" alt="Capture d'écran 2025-07-20 221503" src="https://github.com/user-attachments/assets/4f926a4c-8720-4904-ba68-b581972e4ce9" />
-
-<img width="2220" height="1167" alt="Capture d'écran 2025-07-22 024959" src="https://github.com/user-attachments/assets/60568c4e-7d72-44c8-b4cf-ca2fee33fa27" />
-
-
-
-
 
 
 This system allows for building complex, multi-element scenes in a dynamic and non-destructive way.
