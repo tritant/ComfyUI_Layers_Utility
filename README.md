@@ -5,6 +5,11 @@ This custom node for ComfyUI provides a powerful and flexible dynamic layering s
 This system is built to be intuitive, enabling complex composites directly within your workflow.
 
 -----
+
+
+https://github.com/user-attachments/assets/db8d28b5-e52e-4ae2-a3de-6ff8ce54fe67
+
+
 <img width="2557" height="1235" alt="Capture d'écran 2025-08-10 021011" src="https://github.com/user-attachments/assets/e319a062-5948-47a4-b88d-d8bd348fad95" />
 
 
