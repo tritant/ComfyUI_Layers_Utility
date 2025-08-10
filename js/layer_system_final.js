@@ -114,7 +114,12 @@ app.registerExtension({
             this.dragStart = { x: 0, y: 0 };
             this.initialOffsets = { x: 0, y: 0 };
             this.accordionMode = true;
-            
+            this.interactionMode = "none";
+            this.movingLayerBounds = null;
+            this.initialScale = 1.0;
+			this.initialBounds = null; 
+            this.layerAspectRatio = 1.0;
+			
             setTimeout(() => {
                 const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
                 if (anchorWidget && anchorWidget.inputEl) {
@@ -179,49 +184,171 @@ app.registerExtension({
             }
         };
 
+
+        nodeType.prototype.getHandleAtPos = function(e) {
+            if (!this.movingLayer || !this.movingLayerBounds || !this.previewCanvas) return null;
+            
+            const rect = this.previewCanvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const handleSize = 12;
+            const bounds = this.movingLayerBounds;
+            
+            const corners = {
+                tl: { x: bounds.x, y: bounds.y },
+                tr: { x: bounds.x + bounds.w, y: bounds.y },
+                bl: { x: bounds.x, y: bounds.y + bounds.h },
+                br: { x: bounds.x + bounds.w, y: bounds.y + bounds.h }
+            };
+
+            for (const key in corners) {
+                const corner = corners[key];
+                const handleX = corner.x - handleSize / 2;
+                const handleY = corner.y - handleSize / 2;
+                if (mouseX >= handleX && mouseX <= handleX + handleSize &&
+                    mouseY >= handleY && mouseY <= handleY + handleSize) {
+                    return key; // Retourne "tl", "tr", "bl", ou "br"
+                }
+            }
+            return null;
+        };
+
+
+
         nodeType.prototype.onCanvasMouseDown = function(e) {
             if (!this.movingLayer) return;
+            
             const props = this.layer_properties[this.movingLayer];
             if (!props) return;
-            this.isDragging = true;
-            this.dragStart = { x: e.clientX, y: e.clientY };
-            this.initialOffsets = { x: props.offset_x, y: props.offset_y };
+
+            const handle = this.getHandleAtPos(e);
+
+            if (handle) {
+                this.interactionMode = "scaling_" + handle;
+                this.dragStart = { x: e.clientX, y: e.clientY };
+                this.initialScale = props.scale;
+                this.initialOffsets = { x: props.offset_x, y: props.offset_y };
+                this.initialBounds = { ...this.movingLayerBounds };
+                this.layerAspectRatio = this.initialBounds.w / this.initialBounds.h;
+            } else {
+                this.interactionMode = "moving";
+                this.isDragging = true;
+                this.dragStart = { x: e.clientX, y: e.clientY };
+                this.initialOffsets = { x: props.offset_x, y: props.offset_y };
+            }
+            
             e.preventDefault();
             e.stopPropagation();
         };
 
-        nodeType.prototype.onCanvasMouseMove = function(e) {
-            if (!this.isDragging || !this.movingLayer) return;
+nodeType.prototype.onCanvasMouseMove = function(e) {
+            // --- FIX CURSEUR : Logique de verrouillage du curseur pendant une action ---
+            if (this.interactionMode.startsWith("scaling_")) {
+                if (this.interactionMode === "scaling_tl" || this.interactionMode === "scaling_br") {
+                    this.previewCanvas.style.cursor = "nwse-resize";
+                } else {
+                    this.previewCanvas.style.cursor = "nesw-resize";
+                }
+            } else if (this.interactionMode === "moving") {
+                this.previewCanvas.style.cursor = "move";
+            } else {
+                if (this.movingLayer) {
+                    const handle = this.getHandleAtPos(e);
+                    if (handle === "tl" || handle === "br") {
+                        this.previewCanvas.style.cursor = "nwse-resize";
+                    } else if (handle === "tr" || handle === "bl") {
+                        this.previewCanvas.style.cursor = "nesw-resize";
+                    } else {
+                        this.previewCanvas.style.cursor = "move";
+                    }
+                } else {
+                     this.previewCanvas.style.cursor = "default";
+                }
+            }
+
+            // --- Logique de l'action ---
+            if (this.interactionMode === "none") return;
+            
             const props = this.layer_properties[this.movingLayer];
-            const baseImg = this.basePreviewImage;
-            if (!props || !baseImg) return;
-            const canvas = this.previewCanvas;
-            const imgRatio = baseImg.naturalWidth / baseImg.naturalHeight;
-            const canvasRatio = canvas.width / canvas.height;
-            let destWidth = (imgRatio > canvasRatio) ? canvas.width : canvas.height * imgRatio;
-            if (destWidth === 0) return;
-            const scaleFactor = baseImg.naturalWidth / destWidth;
+            if (!props) return;
+
             const dx = e.clientX - this.dragStart.x;
             const dy = e.clientY - this.dragStart.y;
-            props.offset_x = Math.round(this.initialOffsets.x + (dx * scaleFactor));
-            props.offset_y = Math.round(this.initialOffsets.y + (dy * scaleFactor));
+
+            if (this.interactionMode === "moving") {
+                if (!this.isDragging) return;
+                const baseImg = this.basePreviewImage;
+                if (!baseImg) return;
+                const scaleFactor = (baseImg.naturalWidth / this.movingLayerBounds.w) * props.scale;
+                props.offset_x = Math.round(this.initialOffsets.x + (dx * scaleFactor));
+                props.offset_y = Math.round(this.initialOffsets.y + (dy * scaleFactor));
+
+            } else if (this.interactionMode.startsWith("scaling_")) {
+                let newWidth;
+                
+                if (this.interactionMode === 'scaling_br') {
+                    newWidth = this.initialBounds.w + dx;
+                } else if (this.interactionMode === 'scaling_bl') {
+                    newWidth = this.initialBounds.w - dx;
+                } else if (this.interactionMode === 'scaling_tr') {
+                    newWidth = this.initialBounds.w + dx;
+                } else if (this.interactionMode === 'scaling_tl') {
+                    newWidth = this.initialBounds.w - dx;
+                }
+                
+                if (newWidth < 10) { 
+                    newWidth = 10;
+                }
+                
+                const newScale = this.initialScale * (newWidth / this.initialBounds.w);
+                props.scale = newScale;
+
+                const newHeight = newWidth / this.layerAspectRatio;
+                const dh = newHeight - this.initialBounds.h;
+                
+                let dx_offset = 0;
+                let dy_offset = 0;
+
+                if (this.interactionMode === 'scaling_tl') {
+                    dx_offset = dx;
+                    dy_offset = -dh;
+                } else if (this.interactionMode === 'scaling_tr') {
+                    dy_offset = -dh;
+                } else if (this.interactionMode === 'scaling_bl') {
+                    dx_offset = dx;
+                }
+
+                // --- FIX TypeError : Arrondir les offsets pour envoyer des entiers ---
+                props.offset_x = Math.round(this.initialOffsets.x + (dx_offset / this.previewCanvasScale));
+                props.offset_y = Math.round(this.initialOffsets.y + (dy_offset / this.previewCanvasScale));
+            }
+            
+            // Mettre à jour les widgets en temps réel
+            const scaleWidget = this.widgets.find(w => w.name === `scale_${this.movingLayer}`);
+            if(scaleWidget) scaleWidget.value = props.scale;
             const offsetXWidget = this.widgets.find(w => w.name === `offset_x_${this.movingLayer}`);
+            if(offsetXWidget) offsetXWidget.value = props.offset_x;
             const offsetYWidget = this.widgets.find(w => w.name === `offset_y_${this.movingLayer}`);
-            if (offsetXWidget) offsetXWidget.value = props.offset_x;
-            if (offsetYWidget) offsetYWidget.value = props.offset_y;
+            if(offsetYWidget) offsetYWidget.value = props.offset_y;
+
             this.redrawPreviewCanvas();
         };
 
         nodeType.prototype.onCanvasMouseUp = function(e) {
-            if (this.isDragging) {
+            if (this.interactionMode !== "none") {
                 this.isDragging = false;
+                this.interactionMode = "none";
                 this.updatePropertiesJSON();
             }
         };
 
         nodeType.prototype.onCanvasMouseLeave = function(e) {
-            if (this.isDragging) {
+            if (this.previewCanvas) {
+                this.previewCanvas.style.cursor = "default";
+            }
+            if (this.interactionMode !== "none") {
                 this.isDragging = false;
+                this.interactionMode = "none";
                 this.updatePropertiesJSON();
             }
         };
@@ -345,7 +472,25 @@ nodeType.prototype.redrawPreviewCanvas = function() {
             ctx.drawImage(finalImageToDraw, final_sx, final_sy, final_sw, final_sh, final_dx, final_dy, final_dw, final_dh);
 
             if (this.movingLayer === layerName) {
-                ctx.strokeStyle = "red"; ctx.lineWidth = 2; ctx.strokeRect(final_dx, final_dy, final_dw, final_dh);
+                ctx.strokeStyle = "red"; 
+				ctx.lineWidth = 2; 
+				ctx.strokeRect(final_dx, final_dy, final_dw, final_dh);
+				this.movingLayerBounds = { x: final_dx, y: final_dy, w: final_dw, h: final_dh };
+                const handleSize = 8;
+                ctx.fillStyle = "white";
+                ctx.strokeStyle = "black";
+                ctx.lineWidth = 1;
+				const corners = [
+                  {x: final_dx, y: final_dy}, // tl
+                  {x: final_dx + final_dw, y: final_dy}, // tr
+                  {x: final_dx, y: final_dy + final_dh}, // bl
+                  {x: final_dx + final_dw, y: final_dy + final_dh} // br
+                ];
+
+                for(const corner of corners) {
+                    ctx.fillRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+                    ctx.strokeRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+                }
             }
             
             ctx.restore();
