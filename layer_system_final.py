@@ -20,13 +20,9 @@ def start_preview_server():
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=folder_paths.get_temp_directory(), **kwargs)
 
-            # --- AJOUT CRUCIAL ICI ---
-            # Cette méthode ajoute l'en-tête nécessaire pour autoriser le chargement des images
-            # par le script JavaScript du canvas.
             def end_headers(self):
                 self.send_header('Access-Control-Allow-Origin', '*')
                 super().end_headers()
-            # --- FIN DE L'AJOUT ---
 
             def do_GET(self):
                 if self.path == '/' or self.path.endswith('/'):
@@ -38,7 +34,6 @@ def start_preview_server():
                 return
 
         address = ("127.0.0.1", PREVIEW_SERVER_PORT)
-        # Gestion de l'erreur "Address already in use"
         socketserver.TCPServer.allow_reuse_address = True
         httpd = socketserver.TCPServer(address, SecureHandler)
         thread = threading.Thread(target=httpd.serve_forever)
@@ -49,7 +44,6 @@ def start_preview_server():
 # --- FIN DE LA LOGIQUE DU SERVEUR D'APERÇU ---
 
 
-# Le reste du fichier Python est inchangé
 def prepare_layer(top_image, base_image, resize_mode, scale, offset_x, offset_y):
     B, base_H, base_W, C = base_image.shape
     top_C = top_image.shape[3] if top_image.dim() > 3 else 1
@@ -96,14 +90,21 @@ class LayerSystem:
 
     @classmethod
     def INPUT_TYPES(cls):
+        header_anchors = {}
+        for i in range(1, 11):
+            header_anchors[f"header_anchor_{i}"] = ("STRING", {"multiline": True, "default": ""})
+
+        optional_inputs = {
+            "_properties_json": ("STRING", {"multiline": True, "default": "{}"}),
+            "_preview_anchor": ("STRING", {"multiline": True, "default": "PREVIEW_ANCHOR"}),
+        }
+        optional_inputs.update(header_anchors)
+
         return {
             "required": {
                 "base_image": ("IMAGE",),
             },
-            "optional": {
-                "_properties_json": ("STRING", {"multiline": True, "default": "{}"}),
-                "_preview_anchor": ("STRING", {"multiline": True, "default": "PREVIEW_ANCHOR"}),
-            }
+            "optional": optional_inputs
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -153,33 +154,56 @@ class LayerSystem:
         sorted_layer_names = sorted(layers.keys())
 
         for layer_name in sorted_layer_names:
-            layer_image = layers.get(layer_name)
-            if layer_image is None: continue
+            layer_image_full = layers.get(layer_name)
+            if layer_image_full is None: continue
 
-            layer_pil = self.tensor_to_pil(layer_image)
+            layer_pil = self.tensor_to_pil(layer_image_full)
             layer_filename = f"layersys_{layer_name}.png"
             layer_pil.save(os.path.join(temp_dir, layer_filename))
             previews_data[layer_name] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{layer_filename}"
 
-            if layer_image.shape[-1] == 4:
-                layer_image = layer_image[..., :3]
+            mask_name = layer_name.replace("layer_", "mask_")
+            mask = masks.get(mask_name)
+            
+            # MODIFIÉ : On gère la sauvegarde du masque correctement
+            if mask is not None:
+                # On s'assure que le masque est un tensor 4D (B, H, W, C)
+                mask_for_preview = mask
+                if mask_for_preview.dim() == 3:
+                    mask_for_preview = mask_for_preview.unsqueeze(-1)
+                
+                # On convertit le masque (1 canal) en image RGB (3 canaux) pour la sauvegarde
+                mask_for_preview_rgb = mask_for_preview.repeat(1, 1, 1, 3)
+                
+                mask_pil = self.tensor_to_pil(mask_for_preview_rgb)
+                mask_filename = f"layersys_{mask_name}.png"
+                mask_pil.save(os.path.join(temp_dir, mask_filename))
+                previews_data[mask_name] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{mask_filename}"
+
+            layer_alpha = None
+            if layer_image_full.shape[-1] == 4:
+                layer_alpha = layer_image_full[..., 3:4]
+                layer_image = layer_image_full[..., :3]
+            else:
+                layer_image = layer_image_full
+            
             props = properties.get(layer_name, {})
             if not props.get("enabled", True): continue
+            
             resize_mode = props.get("resize_mode", "fit")
             scale = props.get("scale", 1.0)
             offset_x = props.get("offset_x", 0)
             offset_y = props.get("offset_y", 0)
+            
             prepared_layer = prepare_layer(layer_image, final_image, resize_mode, scale, offset_x, offset_y)
+            
             brightness = props.get("brightness", 0.0)
-            if brightness != 0.0:
-                prepared_layer = torch.clamp(prepared_layer + brightness, 0.0, 1.0)
+            if brightness != 0.0: prepared_layer = torch.clamp(prepared_layer + brightness, 0.0, 1.0)
             contrast = props.get("contrast", 0.0)
             if contrast != 0.0:
                 contrast_factor = 1.0 + contrast
                 prepared_layer = torch.clamp((prepared_layer - 0.5) * contrast_factor + 0.5, 0.0, 1.0)
-            color_r = props.get("color_r", 1.0)
-            color_g = props.get("color_g", 1.0)
-            color_b = props.get("color_b", 1.0)
+            color_r, color_g, color_b = props.get("color_r", 1.0), props.get("color_g", 1.0), props.get("color_b", 1.0)
             if color_r != 1.0 or color_g != 1.0 or color_b != 1.0:
                 prepared_layer[..., 0] = torch.clamp(prepared_layer[..., 0] * color_r, 0.0, 1.0)
                 prepared_layer[..., 1] = torch.clamp(prepared_layer[..., 1] * color_g, 0.0, 1.0)
@@ -189,21 +213,31 @@ class LayerSystem:
                 grayscale = prepared_layer[..., 0] * 0.299 + prepared_layer[..., 1] * 0.587 + prepared_layer[..., 2] * 0.114
                 grayscale = grayscale.unsqueeze(-1)
                 prepared_layer = torch.clamp(grayscale * (1.0 - saturation) + prepared_layer * saturation, 0.0, 1.0)
+            
             mode = props.get("blend_mode", "normal")
+            mode = mode.replace('-', '_')
             opacity = props.get("opacity", 1.0)
             blended_image = self._blend(final_image, prepared_layer, mode)
-            composited_image = (1.0 - opacity) * final_image + opacity * blended_image
-            mask_name = layer_name.replace("layer_", "mask_")
-            mask = masks.get(mask_name)
+            
+            final_mask = None
             if mask is not None:
-                if mask.dim() == 3:
-                    mask = mask.unsqueeze(-1)
-                prepared_mask = prepare_layer(mask, final_image, resize_mode, scale, offset_x, offset_y)
+                if mask.dim() == 3: mask = mask.unsqueeze(-1)
+                final_mask = prepare_layer(mask, final_image, resize_mode, scale, offset_x, offset_y)
                 if props.get("invert_mask", False):
-                    prepared_mask = 1.0 - prepared_mask
-                final_image = final_image * (1.0 - prepared_mask) + composited_image * prepared_mask
+                    final_mask = 1.0 - final_mask
+            elif layer_alpha is not None:
+                final_mask = prepare_layer(layer_alpha, final_image, resize_mode, scale, offset_x, offset_y)
+            
+            if final_mask is not None:
+                final_mask_with_opacity = final_mask * opacity
+                final_image = final_image * (1.0 - final_mask_with_opacity) + blended_image * final_mask_with_opacity
             else:
-                final_image = composited_image
+                if resize_mode != 'stretch':
+                    mask_from_content = (prepared_layer.sum(dim=-1, keepdim=True) > 0.001).float()
+                    mask_with_opacity = mask_from_content * opacity
+                    final_image = final_image * (1.0 - mask_with_opacity) + blended_image * mask_with_opacity
+                else:
+                    final_image = (1.0 - opacity) * final_image + blended_image * opacity
 
         return {
             "result": (final_image,),
