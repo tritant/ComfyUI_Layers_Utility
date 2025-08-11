@@ -3,15 +3,16 @@ import torch.nn.functional as F
 import json
 import numpy as np
 import folder_paths
-from PIL import Image
+from PIL import Image, ImageOps
 import os
 import http.server
 import socketserver
 import threading
+import math
 
-# --- DÉBUT DE LA LOGIQUE DU SERVEUR D'APERÇU ---
+# --- LOGIQUE DU SERVEUR D'APERÇU ---
 preview_server_thread = None
-PREVIEW_SERVER_PORT = 8189 # Port pour notre serveur
+PREVIEW_SERVER_PORT = 8189
 
 def start_preview_server():
     global preview_server_thread
@@ -19,20 +20,16 @@ def start_preview_server():
         class SecureHandler(http.server.SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=folder_paths.get_temp_directory(), **kwargs)
-
             def end_headers(self):
                 self.send_header('Access-Control-Allow-Origin', '*')
                 super().end_headers()
-
             def do_GET(self):
                 if self.path == '/' or self.path.endswith('/'):
                     self.send_error(403, "Directory listing is not allowed")
                     return
                 super().do_GET()
-
             def log_message(self, format, *args):
                 return
-
         address = ("127.0.0.1", PREVIEW_SERVER_PORT)
         socketserver.TCPServer.allow_reuse_address = True
         httpd = socketserver.TCPServer(address, SecureHandler)
@@ -41,22 +38,28 @@ def start_preview_server():
         thread.start()
         preview_server_thread = thread
         print(f"\n[Layer System] INFO: Démarrage du serveur d'aperçu local sur http://127.0.0.1:{PREVIEW_SERVER_PORT}")
-# --- FIN DE LA LOGIQUE DU SERVEUR D'APERÇU ---
 
+# --- FONCTIONS UTILITAIRES ---
+def tensor_to_pil(tensor):
+    return Image.fromarray(np.clip(255. * tensor.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
+
+def pil_to_tensor(image):
+    return torch.from_numpy(np.array(image).astype(np.float32) / 255.0).unsqueeze(0)
 
 def prepare_layer(top_image, base_image, resize_mode, scale, offset_x, offset_y):
     B, base_H, base_W, C = base_image.shape
-    top_C = top_image.shape[3] if top_image.dim() > 3 else 1
-    _, top_H, top_W, _ = top_image.shape
+    _, top_H, top_W, top_C = top_image.shape
     if scale != 1.0:
         new_H, new_W = int(top_H * scale), int(top_W * scale)
         if new_H > 0 and new_W > 0:
             top_image = F.interpolate(top_image.permute(0, 3, 1, 2), size=(new_H, new_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
             top_H, top_W = new_H, new_W
+            
     canvas = torch.zeros(B, base_H, base_W, top_C, device=base_image.device)
     if resize_mode == 'stretch':
         return F.interpolate(top_image.permute(0, 3, 1, 2), size=(base_H, base_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
     elif resize_mode == 'fit':
+        if top_W == 0 or top_H == 0: return canvas
         ratio = min(base_W / top_W, base_H / top_H)
         fit_H, fit_W = int(top_H * ratio), int(top_W * ratio)
         resized_top = F.interpolate(top_image.permute(0, 3, 1, 2), size=(fit_H, fit_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
@@ -64,20 +67,21 @@ def prepare_layer(top_image, base_image, resize_mode, scale, offset_x, offset_y)
         canvas[:, y_start:y_start+fit_H, x_start:x_start+fit_W, :] = resized_top
         return canvas
     elif resize_mode == 'cover':
+        if top_W == 0 or top_H == 0: return canvas
         ratio = max(base_W / top_W, base_H / top_H)
         cover_H, cover_W = int(top_H * ratio), int(top_W * ratio)
-        resized_top = F.interpolate(top_image.permute(0, 3, 1, 2), size=(cover_H, cover_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
+        resized_top = F.interpolate(top_image.permute(0, 3, 1, 2), size=(cover_H, cover_W), mode='bilinear', align_corners=False)
         y_start, x_start = (cover_H - base_H) // 2, (cover_W - base_W) // 2
         src_y_end = min(y_start + base_H, cover_H)
         src_x_end = min(x_start + base_W, cover_W)
-        canvas = resized_top[:, y_start:src_y_end, x_start:src_x_end, :]
-        return canvas
+        canvas_permuted = resized_top[:, :, y_start:src_y_end, x_start:src_x_end]
+        return canvas_permuted.permute(0, 2, 3, 1)
     elif resize_mode == 'crop':
-        x_start, y_start = offset_x, offset_y
-        src_x_start, src_y_start = max(0, -x_start), max(0, -y_start)
-        dst_x_start, dst_y_start = max(0, x_start), max(0, y_start)
-        copy_W = min(base_W - dst_x_start, top_W - src_x_start)
-        copy_H = min(base_H - dst_y_start, top_H - src_y_start)
+        x_start, y_start = int(offset_x), int(offset_y)
+        src_x_start, src_y_start = int(max(0, -x_start)), int(max(0, -y_start))
+        dst_x_start, dst_y_start = int(max(0, x_start)), int(max(0, y_start))
+        copy_W = int(min(base_W - dst_x_start, top_W - src_x_start))
+        copy_H = int(min(base_H - dst_y_start, top_H - src_y_start))
         if copy_W > 0 and copy_H > 0:
             src_slice = top_image[:, src_y_start:src_y_start+copy_H, src_x_start:src_x_start+copy_W, :]
             canvas[:, dst_y_start:dst_y_start+copy_H, dst_x_start:dst_x_start+copy_W, :] = src_slice
@@ -116,9 +120,6 @@ class LayerSystem:
     def IS_CHANGED(cls, **kwargs):
         return float("NaN")
     
-    def tensor_to_pil(self, tensor):
-        return Image.fromarray(np.clip(255. * tensor.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
-
     def _blend(self, base, top, mode):
         if mode == 'normal': return top
         if mode == 'multiply': return base * top
@@ -139,8 +140,9 @@ class LayerSystem:
         final_image = base_image.clone()
         previews_data = {}
         temp_dir = folder_paths.get_temp_directory()
+        B, base_H, base_W, C = base_image.shape
         
-        base_pil = self.tensor_to_pil(base_image)
+        base_pil = tensor_to_pil(base_image)
         base_filename = "layersys_base.png"
         base_pil.save(os.path.join(temp_dir, base_filename))
         previews_data["base_image"] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{base_filename}"
@@ -157,7 +159,7 @@ class LayerSystem:
             layer_image_full = layers.get(layer_name)
             if layer_image_full is None: continue
 
-            layer_pil = self.tensor_to_pil(layer_image_full)
+            layer_pil = tensor_to_pil(layer_image_full)
             layer_filename = f"layersys_{layer_name}.png"
             layer_pil.save(os.path.join(temp_dir, layer_filename))
             previews_data[layer_name] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{layer_filename}"
@@ -165,38 +167,60 @@ class LayerSystem:
             mask_name = layer_name.replace("layer_", "mask_")
             mask = masks.get(mask_name)
             
-            # MODIFIÉ : On gère la sauvegarde du masque correctement
             if mask is not None:
-                # On s'assure que le masque est un tensor 4D (B, H, W, C)
                 mask_for_preview = mask
                 if mask_for_preview.dim() == 3:
                     mask_for_preview = mask_for_preview.unsqueeze(-1)
-                
-                # On convertit le masque (1 canal) en image RGB (3 canaux) pour la sauvegarde
                 mask_for_preview_rgb = mask_for_preview.repeat(1, 1, 1, 3)
-                
-                mask_pil = self.tensor_to_pil(mask_for_preview_rgb)
+                mask_pil = tensor_to_pil(mask_for_preview_rgb)
                 mask_filename = f"layersys_{mask_name}.png"
                 mask_pil.save(os.path.join(temp_dir, mask_filename))
                 previews_data[mask_name] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{mask_filename}"
-
-            layer_alpha = None
-            if layer_image_full.shape[-1] == 4:
-                layer_alpha = layer_image_full[..., 3:4]
-                layer_image = layer_image_full[..., :3]
-            else:
-                layer_image = layer_image_full
             
             props = properties.get(layer_name, {})
             if not props.get("enabled", True): continue
-            
+
             resize_mode = props.get("resize_mode", "fit")
             scale = props.get("scale", 1.0)
             offset_x = props.get("offset_x", 0)
             offset_y = props.get("offset_y", 0)
+            rotation = props.get("rotation", 0.0)
             
-            prepared_layer = prepare_layer(layer_image, final_image, resize_mode, scale, offset_x, offset_y)
-            
+            prepared_layer = None
+            content_alpha_mask = None
+
+            if resize_mode == 'crop':
+                pil_layer = tensor_to_pil(layer_image_full)
+                if pil_layer.mode != 'RGBA':
+                    pil_layer = pil_layer.convert('RGBA')
+
+                new_w = int(pil_layer.width * scale)
+                new_h = int(pil_layer.height * scale)
+                if new_w > 0 and new_h > 0:
+                    pil_layer = pil_layer.resize((new_w, new_h), Image.Resampling.BICUBIC)
+                
+                if rotation != 0.0:
+                    pil_layer = pil_layer.rotate(-rotation, resample=Image.Resampling.BICUBIC, expand=True)
+
+                final_canvas_pil = Image.new('RGBA', (base_W, base_H), (0, 0, 0, 0))
+                paste_x = (base_W // 2) + offset_x - (pil_layer.width // 2)
+                paste_y = (base_H // 2) + offset_y - (pil_layer.height // 2)
+                
+                final_canvas_pil.paste(pil_layer, (paste_x, paste_y), pil_layer)
+                
+                prepared_tensor = pil_to_tensor(final_canvas_pil)
+                prepared_layer = prepared_tensor[..., :3]
+                content_alpha_mask = prepared_tensor[..., 3:4]
+            else:
+                if layer_image_full.shape[-1] == 4:
+                    layer_alpha_channel = layer_image_full[..., 3:4]
+                    layer_image = layer_image_full[..., :3]
+                    content_alpha_mask = prepare_layer(layer_alpha_channel, final_image, resize_mode, scale, offset_x, offset_y)
+                else:
+                    layer_image = layer_image_full
+                
+                prepared_layer = prepare_layer(layer_image, final_image, resize_mode, scale, offset_x, offset_y)
+
             brightness = props.get("brightness", 0.0)
             if brightness != 0.0: prepared_layer = torch.clamp(prepared_layer + brightness, 0.0, 1.0)
             contrast = props.get("contrast", 0.0)
@@ -214,30 +238,69 @@ class LayerSystem:
                 grayscale = grayscale.unsqueeze(-1)
                 prepared_layer = torch.clamp(grayscale * (1.0 - saturation) + prepared_layer * saturation, 0.0, 1.0)
             
-            mode = props.get("blend_mode", "normal")
-            mode = mode.replace('-', '_')
+            mode = props.get("blend_mode", "normal").replace('-', '_')
             opacity = props.get("opacity", 1.0)
             blended_image = self._blend(final_image, prepared_layer, mode)
             
-            final_mask = None
+            # --- START OF THE CORRECTION ---
+            # `blended_image` contains the blended result, but also the blended black background.
+            # We fix this by compositing it onto the `final_image` using the layer's own content shape.
+            # This creates a correct "top layer" before applying the user mask.
+            if content_alpha_mask is None and resize_mode != 'stretch':
+                # If the layer had no alpha (e.g., a JPG), create a mask from its content.
+                content_alpha_mask = (prepared_layer.sum(dim=-1, keepdim=True) > 0.001).float()
+            
+            if content_alpha_mask is not None:
+                # Ensure the mask is the correct size
+                if content_alpha_mask.shape[1:3] != final_image.shape[1:3]:
+                    content_alpha_mask = F.interpolate(content_alpha_mask.permute(0, 3, 1, 2), size=(base_H, base_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
+                
+                # Composite the blended result over the background using the content's alpha.
+                # This removes the black borders from `blended_image`.
+                blended_image = final_image * (1.0 - content_alpha_mask) + blended_image * content_alpha_mask
+            # --- END OF THE CORRECTION ---
+            
+            final_mask = None # This will now only hold the final user-provided mask.
             if mask is not None:
                 if mask.dim() == 3: mask = mask.unsqueeze(-1)
-                final_mask = prepare_layer(mask, final_image, resize_mode, scale, offset_x, offset_y)
+                
+                if resize_mode == 'crop':
+                    pil_mask = tensor_to_pil(mask)
+                    if pil_mask.mode != 'L': pil_mask = pil_mask.convert('L')
+                    
+                    mask_w = int(pil_mask.width * scale)
+                    mask_h = int(pil_mask.height * scale)
+                    if mask_w > 0 and mask_h > 0:
+                        pil_mask = pil_mask.resize((mask_w, mask_h), Image.Resampling.BICUBIC)
+                    
+                    if rotation != 0.0:
+                        pil_mask = pil_mask.rotate(-rotation, resample=Image.Resampling.BICUBIC, expand=True)
+
+                    mask_canvas_pil = Image.new('L', (base_W, base_H), 0)
+                    mask_paste_x = (base_W // 2) + offset_x - (pil_mask.width // 2)
+                    mask_paste_y = (base_H // 2) + offset_y - (pil_mask.height // 2)
+                    mask_canvas_pil.paste(pil_mask, (mask_paste_x, mask_paste_y))
+                    final_mask = pil_to_tensor(mask_canvas_pil)
+                else:
+                    final_mask = prepare_layer(mask, final_image, resize_mode, scale, offset_x, offset_y)
+
+            if final_mask is not None:
+                if final_mask.dim() == 3:
+                    final_mask = final_mask.unsqueeze(-1)
+
                 if props.get("invert_mask", False):
                     final_mask = 1.0 - final_mask
-            elif layer_alpha is not None:
-                final_mask = prepare_layer(layer_alpha, final_image, resize_mode, scale, offset_x, offset_y)
-            
-            if final_mask is not None:
+                
+                if final_mask.shape[1:3] != final_image.shape[1:3]:
+                    final_mask = F.interpolate(final_mask.permute(0, 3, 1, 2), size=(base_H, base_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
+
                 final_mask_with_opacity = final_mask * opacity
+                # `blended_image` is now pre-composited, so it acts as the "top" layer.
                 final_image = final_image * (1.0 - final_mask_with_opacity) + blended_image * final_mask_with_opacity
             else:
-                if resize_mode != 'stretch':
-                    mask_from_content = (prepared_layer.sum(dim=-1, keepdim=True) > 0.001).float()
-                    mask_with_opacity = mask_from_content * opacity
-                    final_image = final_image * (1.0 - mask_with_opacity) + blended_image * mask_with_opacity
-                else:
-                    final_image = (1.0 - opacity) * final_image + blended_image * opacity
+                # No user mask. `blended_image` is already the correct final state of the layer.
+                # We just need to apply the overall opacity.
+                final_image = (1.0 - opacity) * final_image + blended_image * opacity
 
         return {
             "result": (final_image,),
