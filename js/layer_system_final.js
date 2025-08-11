@@ -34,7 +34,12 @@ function applyMask(layerImage, maskImage) {
 const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "soft-light", "hard-light", "difference", "color-dodge", "color-burn"];
 const RESIZE_MODES = ["stretch", "fit", "cover", "crop"];
 const MAX_LAYERS = 10;
-
+const rotateCursorSVG = `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <path d="M12 3A9 9 0 1 1 3 12" stroke="black" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M12 3A9 9 0 1 1 3 12" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+</svg>`;
+const rotateCursorDataUri = `data:image/svg+xml;base64,${btoa(rotateCursorSVG)}`;
+const rotateCursorStyle = `url(${rotateCursorDataUri}) 12 12, auto`;
 const eyeIconPath = new Path2D("M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zM12 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z");
 const eyeSlashPath = new Path2D("M2 4.27l2.28 2.28L3.27 7.5C1.94 8.85 1 10.34 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l2.12 2.12L19.73 19 2 4.27zM12 17c-2.76 0-5-2.24-5-5 0-.77.18-1.5.49-2.14l1.57 1.57c-.01.19-.02.38-.02.57 0 1.66 1.34 3 3 3 .19 0 .38-.01.57-.02l1.57 1.57C13.5 16.82 12.77 17 12 17zm7.88-8.13C21.06 10.15 22 11.08 23 12c-1.73 4.39-6 7.5-11 7.5-.94 0-1.84-.13-2.69-.36l2.03 2.03c.85.22 1.74.33 2.66.33 5 0 9.27-3.11 11-7.5-.73-1.83-2.1-3.38-3.73-4.54l-1.39 1.39zM12 9c.99 0 1.89.28 2.67.77l-1.1-1.1C13.04 8.28 12.53 8 12 8c-2.76 0-5 2.24-5 5 0 .53.08 1.04.23 1.53l-1.1-1.1c-.49-.78-.73-1.68-.73-2.63 0-2.76 2.24-5 5-5z");
 const lockIconPath = new Path2D("M17 8v-1a5 5 0 00-10 0v1H5v12h14V8h-2zm-5 7a2 2 0 110-4 2 2 0 010 4zM9 7V6a3 3 0 116 0v1H9z");
@@ -119,6 +124,7 @@ app.registerExtension({
             this.initialScale = 1.0;
 			this.initialBounds = null; 
             this.layerAspectRatio = 1.0;
+			this.initialRotation = 0.0;
 			
             setTimeout(() => {
                 const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
@@ -185,7 +191,7 @@ app.registerExtension({
         };
 
 
-        nodeType.prototype.getHandleAtPos = function(e) {
+nodeType.prototype.getHandleAtPos = function(e) {
             if (!this.movingLayer || !this.movingLayerBounds || !this.previewCanvas) return null;
             
             const rect = this.previewCanvas.getBoundingClientRect();
@@ -194,6 +200,30 @@ app.registerExtension({
             const handleSize = 12;
             const bounds = this.movingLayerBounds;
             
+            // --- NOUVEAU : Logique pour la rotation ---
+            const props = this.layer_properties[this.movingLayer];
+            const angleInRadians = (props.rotation || 0) * Math.PI / 180;
+            const centerX = bounds.x + bounds.w / 2;
+            const centerY = bounds.y + bounds.h / 2;
+
+            // On "dé-pivote" les coordonnées de la souris pour les comparer aux poignées
+            const cos = Math.cos(-angleInRadians);
+            const sin = Math.sin(-angleInRadians);
+            const dx = mouseX - centerX;
+            const dy = mouseY - centerY;
+            const rotatedMouseX = dx * cos - dy * sin + centerX;
+            const rotatedMouseY = dx * sin + dy * cos + centerY;
+            
+            // Poignée de rotation
+            const rotHandleSize = 16;
+            const rotHandleX = centerX;
+            const rotHandleY = bounds.y - 20; // Position au-dessus du cadre
+            if (rotatedMouseX >= rotHandleX - rotHandleSize / 2 && rotatedMouseX <= rotHandleX + rotHandleSize / 2 &&
+                rotatedMouseY >= rotHandleY - rotHandleSize / 2 && rotatedMouseY <= rotHandleY + rotHandleSize) {
+                return "rotate";
+            }
+
+            // Poignées de redimensionnement (avec les coordonnées de la souris "dé-pivotées")
             const corners = {
                 tl: { x: bounds.x, y: bounds.y },
                 tr: { x: bounds.x + bounds.w, y: bounds.y },
@@ -205,9 +235,9 @@ app.registerExtension({
                 const corner = corners[key];
                 const handleX = corner.x - handleSize / 2;
                 const handleY = corner.y - handleSize / 2;
-                if (mouseX >= handleX && mouseX <= handleX + handleSize &&
-                    mouseY >= handleY && mouseY <= handleY + handleSize) {
-                    return key; // Retourne "tl", "tr", "bl", ou "br"
+                if (rotatedMouseX >= handleX && rotatedMouseX <= handleX + handleSize &&
+                    rotatedMouseY >= handleY && rotatedMouseY <= handleY + handleSize) {
+                    return key;
                 }
             }
             return null;
@@ -215,7 +245,7 @@ app.registerExtension({
 
 
 
-        nodeType.prototype.onCanvasMouseDown = function(e) {
+nodeType.prototype.onCanvasMouseDown = function(e) {
             if (!this.movingLayer) return;
             
             const props = this.layer_properties[this.movingLayer];
@@ -223,14 +253,25 @@ app.registerExtension({
 
             const handle = this.getHandleAtPos(e);
 
-            if (handle) {
+            if (handle && handle !== 'rotate') { // Si c'est une poignée de redimensionnement
                 this.interactionMode = "scaling_" + handle;
                 this.dragStart = { x: e.clientX, y: e.clientY };
                 this.initialScale = props.scale;
                 this.initialOffsets = { x: props.offset_x, y: props.offset_y };
                 this.initialBounds = { ...this.movingLayerBounds };
                 this.layerAspectRatio = this.initialBounds.w / this.initialBounds.h;
-            } else {
+
+            } else if (handle === 'rotate') { // Si c'est la poignée de rotation
+                this.interactionMode = "rotating";
+                const rect = this.previewCanvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                const centerX = this.movingLayerBounds.x + this.movingLayerBounds.w / 2;
+                const centerY = this.movingLayerBounds.y + this.movingLayerBounds.h / 2;
+                this.dragStartAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
+                this.initialRotation = props.rotation || 0;
+
+            } else { // Sinon, c'est un déplacement
                 this.interactionMode = "moving";
                 this.isDragging = true;
                 this.dragStart = { x: e.clientX, y: e.clientY };
@@ -242,7 +283,7 @@ app.registerExtension({
         };
 
 nodeType.prototype.onCanvasMouseMove = function(e) {
-            // --- FIX CURSEUR : Logique de verrouillage du curseur pendant une action ---
+            // Logique de verrouillage du curseur
             if (this.interactionMode.startsWith("scaling_")) {
                 if (this.interactionMode === "scaling_tl" || this.interactionMode === "scaling_br") {
                     this.previewCanvas.style.cursor = "nwse-resize";
@@ -251,22 +292,22 @@ nodeType.prototype.onCanvasMouseMove = function(e) {
                 }
             } else if (this.interactionMode === "moving") {
                 this.previewCanvas.style.cursor = "move";
+            } else if (this.interactionMode === "rotating") {
+                // --- MODIFICATION CURSEUR ROTATION ---
+                this.previewCanvas.style.cursor = rotateCursorStyle;
             } else {
                 if (this.movingLayer) {
                     const handle = this.getHandleAtPos(e);
-                    if (handle === "tl" || handle === "br") {
-                        this.previewCanvas.style.cursor = "nwse-resize";
-                    } else if (handle === "tr" || handle === "bl") {
-                        this.previewCanvas.style.cursor = "nesw-resize";
-                    } else {
-                        this.previewCanvas.style.cursor = "move";
-                    }
+                    if (handle === "tl" || handle === "br") { this.previewCanvas.style.cursor = "nwse-resize"; }
+                    else if (handle === "tr" || handle === "bl") { this.previewCanvas.style.cursor = "nesw-resize"; }
+                    // --- MODIFICATION CURSEUR ROTATION ---
+                    else if (handle === "rotate") { this.previewCanvas.style.cursor = rotateCursorStyle; }
+                    else { this.previewCanvas.style.cursor = "move"; }
                 } else {
                      this.previewCanvas.style.cursor = "default";
                 }
             }
-
-            // --- Logique de l'action ---
+        
             if (this.interactionMode === "none") return;
             
             const props = this.layer_properties[this.movingLayer];
@@ -284,21 +325,20 @@ nodeType.prototype.onCanvasMouseMove = function(e) {
                 props.offset_y = Math.round(this.initialOffsets.y + (dy * scaleFactor));
 
             } else if (this.interactionMode.startsWith("scaling_")) {
+                const angleInRadians = (props.rotation || 0) * Math.PI / 180;
+                const cos = Math.cos(-angleInRadians);
+                const sin = Math.sin(-angleInRadians);
+                const local_dx = dx * cos - dy * sin;
+
                 let newWidth;
                 
-                if (this.interactionMode === 'scaling_br') {
-                    newWidth = this.initialBounds.w + dx;
-                } else if (this.interactionMode === 'scaling_bl') {
-                    newWidth = this.initialBounds.w - dx;
-                } else if (this.interactionMode === 'scaling_tr') {
-                    newWidth = this.initialBounds.w + dx;
-                } else if (this.interactionMode === 'scaling_tl') {
-                    newWidth = this.initialBounds.w - dx;
+                if (this.interactionMode === 'scaling_br' || this.interactionMode === 'scaling_tr') {
+                    newWidth = this.initialBounds.w + local_dx;
+                } else if (this.interactionMode === 'scaling_bl' || this.interactionMode === 'scaling_tl') {
+                    newWidth = this.initialBounds.w - local_dx;
                 }
                 
-                if (newWidth < 10) { 
-                    newWidth = 10;
-                }
+                if (newWidth < 10) { newWidth = 10; }
                 
                 const newScale = this.initialScale * (newWidth / this.initialBounds.w);
                 props.scale = newScale;
@@ -318,19 +358,32 @@ nodeType.prototype.onCanvasMouseMove = function(e) {
                     dx_offset = dx;
                 }
 
-                // --- FIX TypeError : Arrondir les offsets pour envoyer des entiers ---
                 props.offset_x = Math.round(this.initialOffsets.x + (dx_offset / this.previewCanvasScale));
                 props.offset_y = Math.round(this.initialOffsets.y + (dy_offset / this.previewCanvasScale));
+            
+            } else if (this.interactionMode === "rotating") {
+                const rect = this.previewCanvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                const centerX = this.movingLayerBounds.x + this.movingLayerBounds.w / 2;
+                const centerY = this.movingLayerBounds.y + this.movingLayerBounds.h / 2;
+
+                const currentAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
+                const angleDiff = currentAngle - this.dragStartAngle;
+                
+                props.rotation = this.initialRotation + (angleDiff * 180 / Math.PI);
             }
             
-            // Mettre à jour les widgets en temps réel
             const scaleWidget = this.widgets.find(w => w.name === `scale_${this.movingLayer}`);
             if(scaleWidget) scaleWidget.value = props.scale;
             const offsetXWidget = this.widgets.find(w => w.name === `offset_x_${this.movingLayer}`);
             if(offsetXWidget) offsetXWidget.value = props.offset_x;
             const offsetYWidget = this.widgets.find(w => w.name === `offset_y_${this.movingLayer}`);
             if(offsetYWidget) offsetYWidget.value = props.offset_y;
-
+            const rotationWidget = this.widgets.find(w => w.name === `rotation_${this.movingLayer}`);
+            if(rotationWidget) rotationWidget.value = props.rotation;
+            
+            this.graph.setDirtyCanvas(true, true);
             this.redrawPreviewCanvas();
         };
 
@@ -354,149 +407,184 @@ nodeType.prototype.onCanvasMouseMove = function(e) {
         };
 
 nodeType.prototype.redrawPreviewCanvas = function() {
-    if (!this.previewCanvas) return;
-    const canvas = this.previewCanvas;
-    const ctx = this.previewCtx;
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
-    if (canvas.width !== rect.width || canvas.height !== rect.height) {
-        canvas.width = rect.width;
-        canvas.height = rect.height;
-    }
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "black";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    if (this.basePreviewImage && this.basePreviewImage.naturalWidth > 0) {
-        const img = this.basePreviewImage;
-        const imgRatio = img.naturalWidth / img.naturalHeight;
-        const canvasRatio = canvas.width / canvas.height;
-        let destWidth, destHeight, destX, destY;
-        if (imgRatio > canvasRatio) {
-            destWidth = canvas.width; destHeight = canvas.width / imgRatio;
-            destX = 0; destY = (canvas.height - destHeight) / 2;
-        } else {
-            destHeight = canvas.height; destWidth = canvas.height * imgRatio;
-            destY = 0; destX = (canvas.width - destWidth) / 2;
-        }
-        ctx.drawImage(img, destX, destY, destWidth, destHeight);
-        this.previewCanvasScale = destWidth / this.basePreviewImage.naturalWidth;
-
-        const sortedLayerNames = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).map(i => i.name);
-        
-        for (const layerName of sortedLayerNames) {
-            const props = this.layer_properties[layerName];
-            const layerImage = this.loaded_preview_images[layerName];
-            const maskName = layerName.replace("layer_", "mask_");
-            const maskImage = this.loaded_preview_images[maskName];
-
-            if (!props || !props.enabled || !layerImage || !layerImage.naturalWidth || !layerImage.naturalHeight) {
-                continue;
+            if (!this.previewCanvas) return;
+            const canvas = this.previewCanvas;
+            const ctx = this.previewCtx;
+            const rect = canvas.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            if (canvas.width !== rect.width || canvas.height !== rect.height) {
+                canvas.width = rect.width;
+                canvas.height = rect.height;
             }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            ctx.save();
-            
-            let imageToDraw = layerImage;
-            // ... (color correction logic is unchanged) ...
-            if (props.brightness !== 0.0 || props.contrast !== 0.0 || props.saturation !== 1.0 || props.color_r !== 1.0 || props.color_g !== 1.0 || props.color_b !== 1.0) {
-                try {
-                    const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = layerImage.naturalWidth; tempCanvas.height = layerImage.naturalHeight;
-                    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-                    tempCtx.drawImage(layerImage, 0, 0);
-                    const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-                    const data = imageData.data;
-                    const brightness = props.brightness, contrastFactor = 1.0 + props.contrast, saturation = props.saturation, color_r = props.color_r, color_g = props.color_g, color_b = props.color_b;
-                    for (let i = 0; i < data.length; i += 4) {
-                        let r = data[i] / 255.0, g = data[i + 1] / 255.0, b = data[i + 2] / 255.0;
-                        if (brightness !== 0.0) { r += brightness; g += brightness; b += brightness; }
-                        if (props.contrast !== 0.0) { r = (r - 0.5) * contrastFactor + 0.5; g = (g - 0.5) * contrastFactor + 0.5; b = (b - 0.5) * contrastFactor + 0.5; }
-                        if (color_r !== 1.0 || color_g !== 1.0 || color_b !== 1.0) { r *= color_r; g *= color_g; b *= color_b; }
-                        if (saturation !== 1.0) { const gray = r * 0.299 + g * 0.587 + b * 0.114; r = gray * (1.0 - saturation) + r * saturation; g = gray * (1.0 - saturation) + g * saturation; b = gray * (1.0 - saturation) + b * saturation; }
-                        data[i] = Math.max(0, Math.min(255, r * 255)); data[i + 1] = Math.max(0, Math.min(255, g * 255)); data[i + 2] = Math.max(0, Math.min(255, b * 255));
-                    }
-                    tempCtx.putImageData(imageData, 0, 0);
-                    imageToDraw = tempCanvas;
-                } catch (e) {
-                    console.error(`[LayerSystem] ERREUR lors du traitement du calque ${layerName}:`, e);
-                    imageToDraw = layerImage;
+            if (this.basePreviewImage && this.basePreviewImage.naturalWidth > 0) {
+                const img = this.basePreviewImage;
+                const imgRatio = img.naturalWidth / img.naturalHeight;
+                const canvasRatio = canvas.width / canvas.height;
+                let destWidth, destHeight, destX, destY;
+                if (imgRatio > canvasRatio) {
+                    destWidth = canvas.width; destHeight = canvas.width / imgRatio;
+                    destX = 0; destY = (canvas.height - destHeight) / 2;
+                } else {
+                    destHeight = canvas.height; destWidth = canvas.height * imgRatio;
+                    destY = 0; destX = (canvas.width - destWidth) / 2;
                 }
-            }
+                ctx.drawImage(img, destX, destY, destWidth, destHeight);
+                this.previewCanvasScale = destWidth / this.basePreviewImage.naturalWidth;
 
-            let final_sx = 0, final_sy = 0, final_sw = imageToDraw.width, final_sh = imageToDraw.height;
-            let final_dx = destX, final_dy = destY, final_dw = destWidth, final_dh = destHeight;
-            
-            if (props.resize_mode === 'crop') {
-                final_dx = destX + (props.offset_x * this.previewCanvasScale);
-                final_dy = destY + (props.offset_y * this.previewCanvasScale);
-                final_dw = final_sw * props.scale * this.previewCanvasScale;
-                final_dh = final_sh * props.scale * this.previewCanvasScale;
-            } else {
-                const layerRatio = final_sw / final_sh;
-                const destContainerRatio = destWidth / destHeight;
-                switch(props.resize_mode) {
-                    case 'fit':
-                        if (layerRatio > destContainerRatio) { final_dh = final_dw / layerRatio; final_dy += (destHeight - final_dh) / 2; }
-                        else { final_dw = final_dh * layerRatio; final_dx += (destWidth - final_dw) / 2; }
-                        break;
-                    case 'cover':
-                        if (layerRatio > destContainerRatio) { final_sw = final_sh * destContainerRatio; final_sx = (imageToDraw.width - final_sw) / 2; }
-                        else { final_sh = final_sw / destContainerRatio; final_sy = (imageToDraw.height - final_sh) / 2; }
-                        break;
-                    case 'stretch': default: break;
-                }
-            }
-            
-            let finalImageToDraw = imageToDraw;
-
-            if (maskImage && maskImage.naturalWidth > 0) {
-                let maskToApply = maskImage;
-                // NOUVEAU : On gère l'inversion du masque ici
-                if (props.invert_mask) {
-                    const invertedMaskCanvas = document.createElement('canvas');
-                    invertedMaskCanvas.width = maskImage.naturalWidth;
-                    invertedMaskCanvas.height = maskImage.naturalHeight;
-                    const invertedCtx = invertedMaskCanvas.getContext('2d');
-                    // On utilise un filtre CSS pour inverser les couleurs du masque
-                    invertedCtx.filter = 'invert(1)';
-                    invertedCtx.drawImage(maskImage, 0, 0);
-                    maskToApply = invertedMaskCanvas;
-                }
+                const sortedLayerNames = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).map(i => i.name);
                 
-                finalImageToDraw = applyMask(imageToDraw, maskToApply);
-            }
-            
-            ctx.globalAlpha = props.opacity;
-            ctx.globalCompositeOperation = props.blend_mode === 'normal' ? 'source-over' : props.blend_mode;
-            
-            ctx.drawImage(finalImageToDraw, final_sx, final_sy, final_sw, final_sh, final_dx, final_dy, final_dw, final_dh);
+                for (const layerName of sortedLayerNames) {
+                    const props = this.layer_properties[layerName];
+                    const layerImage = this.loaded_preview_images[layerName];
+                    // --- DEBUT LOGIQUE MASQUE ---
+                    const maskName = layerName.replace("layer_", "mask_");
+                    const maskImage = this.loaded_preview_images[maskName];
+                    // --- FIN LOGIQUE MASQUE ---
 
-            if (this.movingLayer === layerName) {
-                ctx.strokeStyle = "red"; 
-				ctx.lineWidth = 2; 
-				ctx.strokeRect(final_dx, final_dy, final_dw, final_dh);
-				this.movingLayerBounds = { x: final_dx, y: final_dy, w: final_dw, h: final_dh };
-                const handleSize = 8;
-                ctx.fillStyle = "white";
-                ctx.strokeStyle = "black";
-                ctx.lineWidth = 1;
-				const corners = [
-                  {x: final_dx, y: final_dy}, // tl
-                  {x: final_dx + final_dw, y: final_dy}, // tr
-                  {x: final_dx, y: final_dy + final_dh}, // bl
-                  {x: final_dx + final_dw, y: final_dy + final_dh} // br
-                ];
+                    if (!props || !props.enabled || !layerImage || !layerImage.naturalWidth || !layerImage.naturalHeight) {
+                        continue;
+                    }
 
-                for(const corner of corners) {
-                    ctx.fillRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
-                    ctx.strokeRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+                    ctx.save();
+                    
+                    let imageToDraw = layerImage;
+                    if (props.brightness !== 0.0 || props.contrast !== 0.0 || props.saturation !== 1.0 || props.color_r !== 1.0 || props.color_g !== 1.0 || props.color_b !== 1.0) {
+                        try {
+                            const tempCanvas = document.createElement('canvas');
+                            tempCanvas.width = layerImage.naturalWidth; tempCanvas.height = layerImage.naturalHeight;
+                            const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+                            tempCtx.drawImage(layerImage, 0, 0);
+                            const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                            const data = imageData.data;
+                            const brightness = props.brightness, contrastFactor = 1.0 + props.contrast, saturation = props.saturation, color_r = props.color_r, color_g = props.color_g, color_b = props.color_b;
+                            for (let i = 0; i < data.length; i += 4) {
+                                let r = data[i] / 255.0, g = data[i + 1] / 255.0, b = data[i + 2] / 255.0;
+                                if (brightness !== 0.0) { r += brightness; g += brightness; b += brightness; }
+                                if (props.contrast !== 0.0) { r = (r - 0.5) * contrastFactor + 0.5; g = (g - 0.5) * contrastFactor + 0.5; b = (b - 0.5) * contrastFactor + 0.5; }
+                                if (color_r !== 1.0 || color_g !== 1.0 || color_b !== 1.0) { r *= color_r; g *= color_g; b *= color_b; }
+                                if (saturation !== 1.0) { const gray = r * 0.299 + g * 0.587 + b * 0.114; r = gray * (1.0 - saturation) + r * saturation; g = gray * (1.0 - saturation) + g * saturation; b = gray * (1.0 - saturation) + b * saturation; }
+                                data[i] = Math.max(0, Math.min(255, r * 255)); data[i + 1] = Math.max(0, Math.min(255, g * 255)); data[i + 2] = Math.max(0, Math.min(255, b * 255));
+                            }
+                            tempCtx.putImageData(imageData, 0, 0);
+                            imageToDraw = tempCanvas;
+                        } catch (e) {
+                            console.error(`[LayerSystem] ERREUR lors du traitement du calque ${layerName}:`, e);
+                            imageToDraw = layerImage;
+                        }
+                    }
+
+                    // --- DEBUT LOGIQUE MASQUE ---
+                    let finalImageToDraw = imageToDraw;
+                    if (maskImage && maskImage.naturalWidth > 0) {
+                        let maskToApply = maskImage;
+                        if (props.invert_mask) {
+                            const invertedMaskCanvas = document.createElement('canvas');
+                            invertedMaskCanvas.width = maskImage.naturalWidth;
+                            invertedMaskCanvas.height = maskImage.naturalHeight;
+                            const invertedCtx = invertedMaskCanvas.getContext('2d');
+                            invertedCtx.filter = 'invert(1)';
+                            invertedCtx.drawImage(maskImage, 0, 0);
+                            maskToApply = invertedMaskCanvas;
+                        }
+                        finalImageToDraw = applyMask(imageToDraw, maskToApply);
+                    }
+                    // --- FIN LOGIQUE MASQUE ---
+
+                    let final_sx = 0, final_sy = 0, final_sw = finalImageToDraw.width, final_sh = finalImageToDraw.height;
+                    let final_dx = destX, final_dy = destY, final_dw = destWidth, final_dh = destHeight;
+                    
+                    if (props.resize_mode === 'crop') {
+                        final_dw = final_sw * props.scale * this.previewCanvasScale;
+                        final_dh = final_sh * props.scale * this.previewCanvasScale;
+                        final_dx = destX + (props.offset_x * this.previewCanvasScale) - final_dw/2 + destWidth/2;
+                        final_dy = destY + (props.offset_y * this.previewCanvasScale) - final_dh/2 + destHeight/2;
+                    } else {
+                         const layerRatio = final_sw / final_sh;
+                         const destContainerRatio = destWidth / destHeight;
+                         switch(props.resize_mode) {
+                             case 'fit':
+                                 if (layerRatio > destContainerRatio) { final_dh = final_dw / layerRatio; final_dy += (destHeight - final_dh) / 2; }
+                                 else { final_dw = final_dh * layerRatio; final_dx += (destWidth - final_dw) / 2; }
+                                 break;
+                             case 'cover':
+                                 if (layerRatio > destContainerRatio) { 
+                                     final_sw = final_sh * destContainerRatio; 
+                                     final_sx = (finalImageToDraw.width - final_sw) / 2; 
+                                 } else { 
+                                     final_sh = final_sw / destContainerRatio; 
+                                     final_sy = (finalImageToDraw.height - final_sh) / 2; 
+                                 }
+                                 break;
+                             case 'stretch': default: break;
+                         }
+                    }
+                    
+                    ctx.globalAlpha = props.opacity;
+                    ctx.globalCompositeOperation = props.blend_mode === 'normal' ? 'source-over' : props.blend_mode;
+
+                    if (props.resize_mode === 'crop') {
+                        const centerX = final_dx + final_dw / 2;
+                        const centerY = final_dy + final_dh / 2;
+                        
+                        ctx.save();
+                        ctx.translate(centerX, centerY);
+                        const angleInRadians = (props.rotation || 0) * Math.PI / 180;
+                        ctx.rotate(angleInRadians);
+
+                        ctx.drawImage(finalImageToDraw, final_sx, final_sy, final_sw, final_sh, -final_dw / 2, -final_dh / 2, final_dw, final_dh);
+
+                        if (this.movingLayer === layerName) {
+                            ctx.strokeStyle = "red"; 
+                            ctx.lineWidth = 2; 
+                            ctx.strokeRect(-final_dw / 2, -final_dh / 2, final_dw, final_dh);
+                            
+                            this.movingLayerBounds = { x: final_dx, y: final_dy, w: final_dw, h: final_dh, center_x: centerX, center_y: centerY };
+                            
+                            const handleSize = 8;
+                            ctx.fillStyle = "white";
+                            ctx.strokeStyle = "black";
+                            ctx.lineWidth = 1;
+                            const corners = [
+                                {x: -final_dw/2, y: -final_dh/2}, {x: final_dw/2, y: -final_dh/2},
+                                {x: -final_dw/2, y: final_dh/2}, {x: final_dw/2, y: final_dh/2}
+                            ];
+                            for(const corner of corners) {
+                                ctx.fillRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+                                ctx.strokeRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+                            }
+                            
+                            const rotHandleOffset = 20;
+                            const rotHandleY = -final_dh/2 - rotHandleOffset;
+                            
+                            ctx.beginPath();
+                            ctx.moveTo(0, -final_dh/2);
+                            ctx.lineTo(0, rotHandleY);
+                            ctx.strokeStyle = "red";
+                            ctx.lineWidth = 2;
+                            ctx.stroke();
+
+                            ctx.beginPath();
+                            ctx.arc(0, rotHandleY, handleSize / 2, 0, 2 * Math.PI);
+                            ctx.fillStyle = "white";
+                            ctx.fill();
+                            ctx.strokeStyle = "black";
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                        
+                        ctx.restore(); 
+                    } else {
+                        ctx.drawImage(finalImageToDraw, final_sx, final_sy, final_sw, final_sh, final_dx, final_dy, final_dw, final_dh);
+                    }
+                    
+                    ctx.restore();
                 }
             }
-            
-            ctx.restore();
-        }
-    }
-};
+        };
         
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (info) {
@@ -765,8 +853,10 @@ nodeType.prototype.redrawPreviewCanvas = function() {
                 } else if (w.name === `toggle_color_${layerName}`) {
                 } else if (["brightness", "contrast", "saturation", "color_r", "color_g", "color_b"].some(p => w.name.startsWith(p))) {
                     isHidden = isLayerCollapsed || isColorCollapsed;
-                } else if (["scale", "offset_x", "offset_y"].some(p => w.name.startsWith(p))) {
+                } else if (["scale", "offset_x", "offset_y", "rotation"].some(p => w.name.startsWith(p)) || w.name === `move_btn_${layerName}`) {
+                // --- FIN MODIFICATION ---
                     isHidden = isLayerCollapsed || !showTransformForCrop;
+                
                 } else if (w.value === `move_btn_${layerName}`){
                     isHidden = isLayerCollapsed || !showTransformForCrop;
                 }
@@ -850,6 +940,7 @@ nodeType.prototype.redrawPreviewCanvas = function() {
             if (!this.layer_properties[layer_name]) {
                 this.layer_properties[layer_name] = {
                     blend_mode: "normal", opacity: 1.0, enabled: true, resize_mode: "fit", scale: 1.0, offset_x: 0, offset_y: 0,
+					rotation: 0.0,
                     brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0, 
                     invert_mask: false, color_section_collapsed: true, layer_collapsed: true,
                 };
@@ -868,8 +959,16 @@ nodeType.prototype.redrawPreviewCanvas = function() {
                 props.color_section_collapsed = !v; this.updateLayerVisibility(layer_name); this.updatePropertiesJSON();
             }, { on: "▼ Color Adjust", off: "▶ Color Adjust" });
             allWidgets.push(colorToggle);
-            const redrawCallback = (prop, v) => { props[prop] = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); };
-            allWidgets.push(this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => redrawCallback('brightness', v), { label: "Brightness", min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
+            //const redrawCallback = (prop, v) => { props[prop] = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); };
+            const redrawCallback = (prop, v) => { 
+                props[prop] = v; 
+                this.updatePropertiesJSON(); 
+                this.redrawPreviewCanvas(); 
+                this.graph.setDirtyCanvas(true, true);
+            };
+			
+			
+			allWidgets.push(this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => redrawCallback('brightness', v), { label: "Brightness", min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
             allWidgets.push(this.addWidget("number", `contrast_${layer_name}`, props.contrast, (v) => redrawCallback('contrast', v), { label: "Contrast", min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
             allWidgets.push(this.addWidget("number", `saturation_${layer_name}`, props.saturation, (v) => redrawCallback('saturation', v), { label: "Saturation", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
             allWidgets.push(this.addWidget("number", `color_r_${layer_name}`, props.color_r, (v) => redrawCallback('color_r', v), { label: "R", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
@@ -886,7 +985,7 @@ nodeType.prototype.redrawPreviewCanvas = function() {
             allWidgets.push(this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => redrawCallback('scale', v), { min: 0.01, max: 10.0, step: 0.1, precision: 2 }));
             allWidgets.push(this.addWidget("number", `offset_x_${layer_name}`, props.offset_x, (v) => redrawCallback('offset_x', v), { min: -8192, max: 8192, step: 1 }));
             allWidgets.push(this.addWidget("number", `offset_y_${layer_name}`, props.offset_y, (v) => redrawCallback('offset_y', v), { min: -8192, max: 8192, step: 1 }));
-
+            allWidgets.push(this.addWidget("number", `rotation_${layer_name}`, props.rotation, (v) => redrawCallback('rotation', v), {min: -360.0, max: 360.0, step: 1, precision: 1 }));
             const bottomSpacer = { name: `bottom_spacer_for_${layer_name}`, type: "CUSTOM_SPACER", draw: () => {}, computeSize: () => [0, 10] };
             this.widgets.push(bottomSpacer);
             allWidgets.push(bottomSpacer);
