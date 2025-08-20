@@ -1,43 +1,28 @@
 import { app } from "/scripts/app.js";
+import { Toolbar } from './toolbar.js';
 
-// L'objet `LiteGraph` est disponible globalement.
 function applyMask(layerImage, maskImage) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    // On s'assure que le canvas temporaire a la même taille que l'image du calque
     canvas.width = layerImage.width;
     canvas.height = layerImage.height;
-
-    // 1. On dessine le MASQUE et on récupère ses données de pixels
-    // On l'étire à la taille du calque au cas où il y aurait une différence
     ctx.drawImage(maskImage, 0, 0, layerImage.width, layerImage.height);
     const maskData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    
-    // 2. On efface, on dessine le CALQUE et on récupère ses données
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(layerImage, 0, 0);
     const layerData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-    // 3. Pixel par pixel, on applique la luminance du masque à la transparence du calque
     for (let i = 0; i < maskData.data.length; i += 4) {
-        // La valeur de gris du masque est dans le canal rouge (puisque R=G=B)
         const luminance = maskData.data[i];
-        // On assigne cette valeur au canal alpha (transparence) du calque
         layerData.data[i + 3] = luminance;
     }
-
-    // 4. On remet les données modifiées sur le canvas
     ctx.putImageData(layerData, 0, 0);
-    return canvas; // On retourne le canvas avec le calque correctement masqué
+    return canvas;
 }
 
 const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "soft-light", "hard-light", "difference", "color-dodge", "color-burn"];
 const RESIZE_MODES = ["stretch", "fit", "cover", "crop"];
 const MAX_LAYERS = 10;
-const rotateCursorSVG = `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none">
-  <path d="M12 3A9 9 0 1 1 3 12" stroke="black" stroke-width="3.5" stroke-linecap="round"/>
-  <path d="M12 3A9 9 0 1 1 3 12" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
-</svg>`;
+const rotateCursorSVG = `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none"><path d="M12 3A9 9 0 1 1 3 12" stroke="black" stroke-width="3.5" stroke-linecap="round"/><path d="M12 3A9 9 0 1 1 3 12" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 const rotateCursorDataUri = `data:image/svg+xml;base64,${btoa(rotateCursorSVG)}`;
 const rotateCursorStyle = `url(${rotateCursorDataUri}) 12 12, auto`;
 const eyeIconPath = new Path2D("M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zM12 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z");
@@ -61,8 +46,11 @@ app.registerExtension({
             const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
             if (anchorWidget && this.basePreviewImage) {
                 const aspectRatio = this.basePreviewImage.naturalHeight / this.basePreviewImage.naturalWidth;
-                const contentWidth = this.size[0] - 20;
-                anchorWidget.computeSize = () => [this.size[0], contentWidth * aspectRatio];
+                const toolbarWidth = this.toolbar ? this.toolbar.width : 0;
+                const contentWidth = this.size[0] - 20 - toolbarWidth;
+                const requiredHeight = contentWidth * aspectRatio;
+                
+                anchorWidget.computeSize = () => [this.size[0], requiredHeight];
             }
             const newSize = this.computeSize();
             this.size[1] = newSize[1]; 
@@ -85,10 +73,7 @@ app.registerExtension({
                         img.crossOrigin = "anonymous";
                         img.src = url + `?t=${Date.now()}`;
                         img.onload = () => resolve({ name, img });
-                        img.onerror = (err) => {
-                            console.error(`[LayerSystem] Impossible de charger l'image ${url}.`);
-                            reject(err);
-                        };
+                        img.onerror = (err) => reject(err);
                     });
                 });
                 Promise.all(imagePromises)
@@ -108,7 +93,7 @@ app.registerExtension({
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
-            if (!this.layer_properties) { this.layer_properties = {}; }
+            this.layer_properties = this.layer_properties || {};
             this.basePreviewImage = null;
             this.preview_data = {};
             this.loaded_preview_images = {};
@@ -122,10 +107,20 @@ app.registerExtension({
             this.interactionMode = "none";
             this.movingLayerBounds = null;
             this.initialScale = 1.0;
-			this.initialBounds = null; 
+            this.initialBounds = null; 
             this.layerAspectRatio = 1.0;
-			this.initialRotation = 0.0;
+            this.initialRotation = 0.0;
+            this.textActionMode = "none";
+            this.activeTextObject = null;
+            this.initialTextPos = { x: 0, y: 0 };
+			this.isTextDragging = false;
+			this.dragOffset = { x: 0, y: 0 };
+			this.needsFirstSync = true;
+			this._resizing = false;
+			this.rotationOffsetAngle = 0.0;
 			
+            this.toolbar = new Toolbar(this);
+            
             setTimeout(() => {
                 const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
                 if (anchorWidget && anchorWidget.inputEl) {
@@ -133,13 +128,8 @@ app.registerExtension({
                     const container = anchorWidget.inputEl.parentElement;
                     container.style.padding = "0px";
                     container.style.margin = "0px";
-
-                    // --- MODIFICATION APPROCHE 1 (Aperçu Principal) ---
-                    // On ne remplace pas l'élément, on le cache et on ajoute le nôtre.
                     anchorWidget.inputEl.style.display = "none";
                     container.appendChild(canvas);
-                    // --- FIN DE LA MODIFICATION ---
-
                     this.previewCanvas = canvas;
                     this.previewCtx = canvas.getContext("2d");
                     const anchorIndex = this.widgets.indexOf(anchorWidget);
@@ -148,7 +138,60 @@ app.registerExtension({
                        this.widgets.unshift(anchorWidget);
                     }
                     this.redrawPreviewCanvas();
-                    this.previewCanvas.addEventListener('mousedown', this.onCanvasMouseDown.bind(this));
+this.previewCanvas.addEventListener('mousedown', (e) => {
+    const mouseX = e.offsetX;
+    const mouseY = e.offsetY;
+
+    if (this.textActionMode === 'moving' && this.activeTextObject) {
+        const targetText = this.findTextElementAtPos(mouseX, mouseY);
+        if (targetText && targetText.id === this.activeTextObject.id) {
+            this.dragOffset = {
+                x: targetText.x - mouseX,
+                y: targetText.y - mouseY
+            };
+            this.isTextDragging = true;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+    }
+
+    if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
+        this.toolbar.handleClick(e, mouseX, mouseY);
+        return;
+    }
+    
+    if (this.toolbar.activeTool) {
+        this.toolbar.handleCanvasClick(e);
+        return;
+    }
+
+    if (!this.movingLayer) return;
+    const props = this.layer_properties[this.movingLayer];
+    if (!props) return;
+    const handle = this.getHandleAtPos(e);
+    if (handle && handle !== 'rotate') {
+        this.interactionMode = "scaling_" + handle;
+        this.dragStart = { x: e.clientX, y: e.clientY };
+        this.initialScale = props.scale;
+        this.initialOffsets = { x: props.offset_x, y: props.offset_y };
+        this.initialBounds = { ...this.movingLayerBounds };
+        this.layerAspectRatio = this.initialBounds.w / this.initialBounds.h;
+    } else if (handle === 'rotate') {
+        this.interactionMode = "rotating";
+        const centerX = this.movingLayerBounds.x + this.movingLayerBounds.w / 2;
+        const centerY = this.movingLayerBounds.y + this.movingLayerBounds.h / 2;
+        this.dragStartAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
+        this.initialRotation = props.rotation || 0;
+    } else {
+        this.interactionMode = "moving";
+        this.isDragging = true;
+        this.dragStart = { x: e.clientX, y: e.clientY };
+        this.initialOffsets = { x: props.offset_x, y: props.offset_y };
+    }
+    e.preventDefault();
+    e.stopPropagation();
+});
                     this.previewCanvas.addEventListener('mousemove', this.onCanvasMouseMove.bind(this));
                     this.previewCanvas.addEventListener('mouseup', this.onCanvasMouseUp.bind(this));
                     this.previewCanvas.addEventListener('mouseleave', this.onCanvasMouseLeave.bind(this));
@@ -166,124 +209,650 @@ app.registerExtension({
             }, 0);
         };
         
-        const onResize = nodeType.prototype.onResize;
-        nodeType.prototype.onResize = function(size) {
-            // --- CORRECTION FINALE ---
-            // Protection contre le contexte invalide lors de l'appel par addInput
-            if (!this.widgets) {
+nodeType.prototype.onResize = function(size) {
+    // Utilise le flag pour éviter les boucles infinies
+    if (this._resizing) return;
+    this._resizing = true;
+
+    // On s'assure que tout est prêt pour le calcul
+    if (!this.widgets || !this.size || !this.basePreviewImage || this.basePreviewImage.naturalWidth <= 0) {
+        this._resizing = false;
+        return;
+    }
+    
+    // --- Logique de recalcul de la hauteur ---
+    const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
+    if (anchorWidget) {
+        const aspectRatio = this.basePreviewImage.naturalHeight / this.basePreviewImage.naturalWidth;
+        const toolbarWidth = this.toolbar ? this.toolbar.width : 0;
+        const contentWidth = size[0] - 20 - toolbarWidth;
+        const requiredHeight = contentWidth * aspectRatio;
+        
+        // On force temporairement la hauteur du widget de l'aperçu
+        anchorWidget.computeSize = () => [size[0], requiredHeight];
+    }
+    
+    // On force le nœud à recalculer sa hauteur totale
+    const newComputedSize = this.computeSize();
+    this.size[1] = newComputedSize[1];
+
+    // On nettoie notre modification temporaire
+    if (anchorWidget?.computeSize) {
+        delete anchorWidget.computeSize;
+    }
+    // --- Fin de la logique de recalcul ---
+
+    // On planifie le redessinage du contenu du canevas
+    if (this.previewCanvas) {
+        if (this.redraw_req) cancelAnimationFrame(this.redraw_req);
+        this.redraw_req = requestAnimationFrame(() => {
+            this.redrawPreviewCanvas();
+            this.redraw_req = null;
+        });
+    }
+
+    // On redessine les en-têtes des calques
+    for (let i = 1; i <= 10; i++) { // Remplacer 10 par MAX_LAYERS serait mieux
+        const headerAnchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
+        if (headerAnchor && headerAnchor.canvas) {
+            this.drawHeaderCanvas(headerAnchor.canvas, `layer_${i}`);
+        }
+    }
+    
+    // On baisse le drapeau pour la prochaine action
+    this._resizing = false;
+};
+
+nodeType.prototype.onConfigure = function (info) {
+    // On appelle la fonction originale de LiteGraph si elle existe
+    const onConfigureOriginal = nodeType.prototype.__proto__.onConfigure;
+    onConfigureOriginal?.apply(this, arguments);
+
+    if (info.widgets_values) {
+        // --- NOUVELLE LOGIQUE DE CHARGEMENT ROBUSTE ---
+        let mainDataString = null;
+        
+        // On parcourt toutes les valeurs sauvegardées...
+        for (const val of info.widgets_values) {
+            // ... et on cherche la première qui est une chaîne de caractères et qui commence par '{"layers":'
+            if (typeof val === 'string' && val.startsWith('{"layers":')) {
+                mainDataString = val;
+                break; // On a trouvé nos données, on arrête de chercher.
+            }
+        }
+
+        // Si on a trouvé notre bloc de données, on le charge.
+        if (mainDataString) {
+            try {
+                const props = JSON.parse(mainDataString);
+                this.layer_properties = props.layers || {};
+                
+                // On s'assure que la toolbar existe avant de lui assigner les textes
+                if (this.toolbar) {
+                    this.toolbar.textElements = props.texts || [];
+                } else {
+                    // Si la toolbar n'est pas prête, on met les données en attente (sécurité)
+                    this.loadedTextData = props.texts || [];
+                }
+                
+                console.log("[LayerSystem] Données chargées avec succès depuis le bloc principal.");
+
+            } catch(e) { console.error("[LayerSystem] Erreur lors de l'analyse du JSON principal dans onConfigure", e); }
+        }
+    }
+    
+    // On active les sauvegardes uniquement à la toute fin.
+    this.isConfigured = true;
+};
+        
+        const onConnectionsChange = nodeType.prototype.onConnectionsChange;
+        nodeType.prototype.onConnectionsChange = function (side, slot, is_connected, link_info, io_slot) {
+            onConnectionsChange?.apply(this, arguments);
+            if (side === 1) { setTimeout(() => this.refreshUI(), 0); }
+        };
+
+        nodeType.prototype.redrawPreviewCanvas = function() {
+            if (!this.previewCanvas || !this.size || !this.basePreviewImage || !this.basePreviewImage.naturalWidth) {
+                if(this.previewCtx) this.previewCtx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+                return;
+            }
+            
+            const canvas = this.previewCanvas;
+            const ctx = this.previewCtx;
+            const baseImg = this.basePreviewImage;
+
+            const availableWidth = this.size[0] - 20; 
+            const toolbarWidth = this.toolbar.width;
+            const imageAreaWidth = availableWidth - toolbarWidth;
+            const aspectRatio = baseImg.naturalHeight / baseImg.naturalWidth;
+            const requiredHeight = imageAreaWidth * aspectRatio;
+
+            if (canvas.width !== availableWidth) {
+                canvas.width = availableWidth;
+            }
+            const finalHeight = Math.round(requiredHeight);
+            if (canvas.height !== finalHeight) {
+                canvas.height = finalHeight;
+            }
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const destX = toolbarWidth;
+            const destY = 0;
+            const destWidth = imageAreaWidth;
+            const destHeight = finalHeight;
+
+            ctx.drawImage(baseImg, destX, destY, destWidth, destHeight);
+            this.previewCanvasScale = destWidth / baseImg.naturalWidth;
+            
+            const sortedLayerNames = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).map(i => i.name);
+            
+            for (const layerName of sortedLayerNames) {
+                const props = this.layer_properties[layerName];
+                const layerImage = this.loaded_preview_images[layerName];
+                const maskName = layerName.replace("layer_", "mask_");
+                const maskImage = this.loaded_preview_images[maskName];
+
+                if (!props || !props.enabled || !layerImage || !layerImage.naturalWidth || !layerImage.naturalHeight) {
+                    continue;
+                }
+
+                ctx.save();
+                let imageToDraw = layerImage;
+                if (props.brightness !== 0.0 || props.contrast !== 0.0 || props.saturation !== 1.0 || props.color_r !== 1.0 || props.color_g !== 1.0 || props.color_b !== 1.0) {
+                    try {
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = layerImage.naturalWidth; tempCanvas.height = layerImage.naturalHeight;
+                        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+                        tempCtx.drawImage(layerImage, 0, 0);
+                        const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                        const data = imageData.data;
+                        const brightness = props.brightness, contrastFactor = 1.0 + props.contrast, saturation = props.saturation, color_r = props.color_r, color_g = props.color_g, color_b = props.color_b;
+                        for (let i = 0; i < data.length; i += 4) {
+                            let r = data[i] / 255.0, g = data[i + 1] / 255.0, b = data[i + 2] / 255.0;
+                            if (brightness !== 0.0) { r += brightness; g += brightness; b += brightness; }
+                            if (props.contrast !== 0.0) { r = (r - 0.5) * contrastFactor + 0.5; g = (g - 0.5) * contrastFactor + 0.5; b = (b - 0.5) * contrastFactor + 0.5; }
+                            if (color_r !== 1.0 || color_g !== 1.0 || color_b !== 1.0) { r *= color_r; g *= color_g; b *= color_b; }
+                            if (saturation !== 1.0) { const gray = r * 0.299 + g * 0.587 + b * 0.114; r = gray * (1.0 - saturation) + r * saturation; g = gray * (1.0 - saturation) + g * saturation; b = gray * (1.0 - saturation) + b * saturation; }
+                            data[i] = Math.max(0, Math.min(255, r * 255)); data[i + 1] = Math.max(0, Math.min(255, g * 255)); data[i + 2] = Math.max(0, Math.min(255, b * 255));
+                        }
+                        tempCtx.putImageData(imageData, 0, 0);
+                        imageToDraw = tempCanvas;
+                    } catch (e) {
+                        console.error(`[LayerSystem] ERREUR lors du traitement du calque ${layerName}:`, e);
+                        imageToDraw = layerImage;
+                    }
+                }
+
+                let finalImageToDraw = imageToDraw;
+                if (maskImage && maskImage.naturalWidth > 0) {
+                    let maskToApply = maskImage;
+                    if (props.invert_mask) {
+                        const invertedMaskCanvas = document.createElement('canvas');
+                        invertedMaskCanvas.width = maskImage.naturalWidth;
+                        invertedMaskCanvas.height = maskImage.naturalHeight;
+                        const invertedCtx = invertedMaskCanvas.getContext('2d');
+                        invertedCtx.filter = 'invert(1)';
+                        invertedCtx.drawImage(maskImage, 0, 0);
+                        maskToApply = invertedMaskCanvas;
+                    }
+                    finalImageToDraw = applyMask(imageToDraw, maskToApply);
+                }
+
+                let final_sx = 0, final_sy = 0, final_sw = finalImageToDraw.width, final_sh = finalImageToDraw.height;
+                let final_dx = destX, final_dy = destY, final_dw = destWidth, final_dh = destHeight;
+                
+                if (props.resize_mode === 'crop') {
+                    final_dw = final_sw * props.scale * this.previewCanvasScale;
+                    final_dh = final_sh * props.scale * this.previewCanvasScale;
+                    final_dx = destX + (props.offset_x * this.previewCanvasScale) - final_dw/2 + destWidth/2;
+                    final_dy = destY + (props.offset_y * this.previewCanvasScale) - final_dh/2 + destHeight/2;
+                } else {
+                    const layerRatio = final_sw / final_sh;
+                    const destContainerRatio = destWidth / destHeight;
+                    switch(props.resize_mode) {
+                        case 'fit':
+                            if (layerRatio > destContainerRatio) { final_dh = final_dw / layerRatio; final_dy += (destHeight - final_dh) / 2; }
+                            else { final_dw = final_dh * layerRatio; final_dx += (destWidth - final_dw) / 2; }
+                            break;
+                        case 'cover':
+                            if (layerRatio > destContainerRatio) { 
+                                final_sw = final_sh * destContainerRatio; 
+                                final_sx = (finalImageToDraw.width - final_sw) / 2; 
+                            } else { 
+                                final_sh = final_sw / destContainerRatio; 
+                                final_sy = (finalImageToDraw.height - final_sh) / 2; 
+                            }
+                            break;
+                        case 'stretch': default: break;
+                    }
+                }
+                
+                ctx.globalAlpha = props.opacity;
+                ctx.globalCompositeOperation = props.blend_mode === 'normal' ? 'source-over' : props.blend_mode;
+
+                if (props.resize_mode === 'crop') {
+                    const centerX = final_dx + final_dw / 2;
+                    const centerY = final_dy + final_dh / 2;
+                    
+                    ctx.save();
+                    ctx.translate(centerX, centerY);
+                    const angleInRadians = (props.rotation || 0) * Math.PI / 180;
+                    ctx.rotate(angleInRadians);
+
+                    ctx.drawImage(finalImageToDraw, final_sx, final_sy, final_sw, final_sh, -final_dw / 2, -final_dh / 2, final_dw, final_dh);
+
+                    if (this.movingLayer === layerName) {
+                        ctx.strokeStyle = "red"; 
+                        ctx.lineWidth = 2; 
+                        ctx.strokeRect(-final_dw / 2, -final_dh / 2, final_dw, final_dh);
+                        
+                        this.movingLayerBounds = { x: final_dx, y: final_dy, w: final_dw, h: final_dh, center_x: centerX, center_y: centerY };
+                        
+                        const handleSize = 8;
+                        ctx.fillStyle = "white";
+                        ctx.strokeStyle = "black";
+                        ctx.lineWidth = 1;
+                        const corners = [
+                            {x: -final_dw/2, y: -final_dh/2}, {x: final_dw/2, y: -final_dh/2},
+                            {x: -final_dw/2, y: final_dh/2}, {x: final_dw/2, y: final_dh/2}
+                        ];
+                        for(const corner of corners) {
+                            ctx.fillRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+                            ctx.strokeRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+                        }
+                        
+                        const rotHandleOffset = 20;
+                        const rotHandleY = -final_dh/2 - rotHandleOffset;
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(0, -final_dh/2);
+                        ctx.lineTo(0, rotHandleY);
+                        ctx.strokeStyle = "red";
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+
+                        ctx.beginPath();
+                        ctx.arc(0, rotHandleY, handleSize / 2, 0, 2 * Math.PI);
+                        ctx.fillStyle = "white";
+                        ctx.fill();
+                        ctx.strokeStyle = "black";
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                    
+                    ctx.restore(); 
+                } else {
+                    ctx.drawImage(finalImageToDraw, final_sx, final_sy, final_sw, final_sh, final_dx, final_dy, final_dw, final_dh);
+                }
+                
+                ctx.restore();
+            }
+            
+         if (this.toolbar && this.toolbar.selectedTextObject) {
+            const el = this.toolbar.selectedTextObject;
+            const metrics = this.getTextPreviewMetrics(el);
+
+            if (metrics) {
+                ctx.save();
+                ctx.strokeStyle = '#FFD700';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 3]);
+                
+                const padding = 5;
+                ctx.strokeRect(
+                    metrics.x - padding,
+                    metrics.y - padding,
+                    metrics.width + (padding * 2),
+                    metrics.height + (padding * 2)
+                );
+                
+                ctx.restore();
+            }
+        }
+			
+            this.toolbar.drawTextElements(ctx);
+            this.toolbar.draw(ctx);
+			//if (this.needsFirstSync) {
+              //this.refreshUI();
+              //this.needsFirstSync = false;
+            //}
+        };
+		
+nodeType.prototype.getTextPreviewMetrics = function(textEl) {
+    if (!this.basePreviewImage || !this.previewCanvas || !this.toolbar) { return null; }
+
+    const baseImageWidth = this.basePreviewImage.naturalWidth;
+    const previewAreaWidth = this.previewCanvas.width - this.toolbar.width;
+    if (baseImageWidth <= 0) return null;
+
+    const inverseRatio = previewAreaWidth / baseImageWidth;
+
+    const previewCenterX = previewAreaWidth / 2;
+    const previewCenterY = this.previewCanvas.height / 2;
+
+    const preview_size = textEl.size * inverseRatio;
+    const preview_offset_x = textEl.offset_x * inverseRatio;
+    const preview_offset_y = textEl.offset_y * inverseRatio;
+
+    const preview_x = this.toolbar.width + previewCenterX + preview_offset_x;
+    const preview_y = previewCenterY + preview_offset_y;
+
+    const ctx = this.previewCtx;
+    ctx.save();
+    ctx.font = `${preview_size}px ${textEl.fontFamily || 'Arial'}`;
+    const metrics = ctx.measureText(textEl.text);
+    ctx.restore();
+
+    const textHeight = (metrics.fontBoundingBoxAscent || 0) + (metrics.fontBoundingBoxDescent || 0);
+    const finalHeight = textHeight > 0 ? textHeight : preview_size;
+
+    return {
+        x: preview_x,
+        y: preview_y,
+        size: preview_size,
+        width: metrics.width,
+        height: finalHeight -10
+    };
+};
+
+nodeType.prototype.findTextElementAtPos = function(mouseX, mouseY) {
+    if (!this.toolbar || !this.toolbar.textElements.length || !this.previewCanvas || !this.basePreviewImage) {
+        return null;
+    }
+
+    const ctx = this.previewCtx;
+    const baseImageWidth = this.basePreviewImage.naturalWidth;
+    const previewAreaWidth = this.previewCanvas.width - this.toolbar.width;
+    
+    if (baseImageWidth <= 0) return null;
+
+    const inverseRatio = previewAreaWidth / baseImageWidth;
+    const previewCenterX = previewAreaWidth / 2;
+    const previewCenterY = this.previewCanvas.height / 2;
+
+    ctx.save();
+    
+    for (let i = this.toolbar.textElements.length - 1; i >= 0; i--) {
+        const textEl = this.toolbar.textElements[i];
+        const preview_offset_x = textEl.offset_x * inverseRatio;
+        const preview_offset_y = textEl.offset_y * inverseRatio;
+        const preview_size = textEl.size * inverseRatio;
+        const preview_x = this.toolbar.width + previewCenterX + preview_offset_x;
+        const preview_y = previewCenterY + preview_offset_y;
+        
+        ctx.font = `${preview_size}px ${textEl.fontFamily || 'Arial'}`;
+        const metrics = ctx.measureText(textEl.text);
+        const textWidth = metrics.width;
+        const textHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent || preview_size;
+
+        if (mouseX >= preview_x && mouseX <= preview_x + textWidth &&
+            mouseY >= preview_y && mouseY <= preview_y + textHeight) 
+        {
+            ctx.restore();
+            return textEl;
+        }
+    }
+
+    ctx.restore();
+    return null;
+};
+
+nodeType.prototype.editTextElement = function(textElement) {
+    if (this.toolbar.activeTextarea) this.toolbar.activeTextarea.remove();
+
+    const metrics = this.getTextPreviewMetrics(textElement);
+    if (!metrics) {
+        console.error("LayerSystem: Impossible de trouver la position du texte pour l'édition.");
+        return;
+    }
+
+    const canvasRect = this.previewCanvas.getBoundingClientRect();
+    const finalLeft = canvasRect.left + metrics.x;
+    const finalTop = canvasRect.top + metrics.y;
+    const finalFontSize = metrics.size;
+    const textInput = document.createElement("div");
+    this.toolbar.activeTextarea = textInput;
+    textInput.contentEditable = true;
+    textInput.innerText = textElement.text;
+
+    Object.assign(textInput.style, {
+        position: 'fixed',
+        left: `${finalLeft}px`,
+        top: `${finalTop}px`,
+        fontFamily: textElement.fontFamily,
+        fontSize: `${finalFontSize}px`,
+        color: 'white',
+        background: 'rgba(20,20,20,0.9)',
+        border: '1px solid #FFD700',
+        padding: '5px',
+        zIndex: '9999',
+        minWidth: `${metrics.width}px`,
+        whiteSpace: 'pre-wrap'
+    });
+
+    document.body.appendChild(textInput);
+    textInput.focus();
+    document.execCommand('selectAll', false, null);
+
+    textInput.addEventListener('keydown', (evt) => evt.stopPropagation());
+
+    const onFinish = () => {
+        const newText = textInput.innerText;
+        
+        if (newText === "") {
+            const index = this.toolbar.textElements.findIndex(el => el.id === textElement.id);
+            if (index > -1) this.toolbar.textElements.splice(index, 1);
+        } else {
+            textElement.text = newText;
+        }
+
+        this.updatePropertiesJSON();
+        this.redrawPreviewCanvas();
+        
+        if (textInput.parentElement) textInput.parentElement.removeChild(textInput);
+        this.toolbar.activeTextarea = null;
+        this.toolbar.hideContextualToolbar();
+    };
+
+    textInput.addEventListener('blur', onFinish);
+    textInput.addEventListener('keydown', (evt) => {
+        evt.stopPropagation();
+        if (evt.key === 'Enter' && !evt.shiftKey) {
+            evt.preventDefault();
+            onFinish();
+        }
+        if (evt.key === 'Escape') {
+            textInput.innerText = textElement.text;
+            onFinish();
+
+        }
+    });
+};
+
+nodeType.prototype.showTextContextMenu = function(clientX, clientY, textElement) {
+    const existingMenu = document.getElementById("text-context-menu");
+    if (existingMenu) existingMenu.remove();
+    
+    this.activeTextObject = textElement;
+
+    const menu = document.createElement("div");
+    menu.id = "text-context-menu";
+    Object.assign(menu.style, {
+        position: 'fixed', left: `${clientX}px`, top: `${clientY}px`, backgroundColor: '#333',
+        border: '1px solid #555', borderRadius: '4px', padding: '5px', zIndex: '10000',
+        display: 'flex', flexDirection: 'column',
+    });
+
+    const actionNames = ['Modifier le texte', 'Déplacer', 'Redimensionner', 'Pivoter', 'Supprimer'];
+    
+    actionNames.forEach(actionName => {
+        const button = document.createElement("button");
+        button.innerText = actionName;
+        Object.assign(button.style, {
+            backgroundColor: '#444', color: 'white', border: '1px solid #666',
+            padding: '8px 12px', margin: '2px', textAlign: 'left', cursor: 'pointer'
+        });
+        button.onmouseover = () => button.style.backgroundColor = '#555';
+        button.onmouseout = () => button.style.backgroundColor = '#444';
+        
+button.onclick = (e) => {
+            menu.remove();
+
+            const currentTextElement = this.toolbar.textElements.find(el => el.id === textElement.id);
+            if (!currentTextElement) {
+                console.log("L'élément texte a été supprimé, action annulée.");
                 return;
             }
 
-            onResize?.apply(this, arguments);
-            if (this.previewCanvas) {
-                if (this.redraw_req) cancelAnimationFrame(this.redraw_req);
-                this.redraw_req = requestAnimationFrame(() => {
+            switch (actionName) {
+                case 'Modifier le texte':
+                    this.editTextElement(currentTextElement);
+                    break;
+                case 'Déplacer':
+                    this.textActionMode = 'moving';
+                    this.activeTextObject = currentTextElement;
                     this.redrawPreviewCanvas();
-                    this.redraw_req = null;
-                });
-            }
-            for (let i = 1; i <= MAX_LAYERS; i++) {
-                const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
-                if (anchor && anchor.canvas) {
-                    this.drawHeaderCanvas(anchor.canvas, `layer_${i}`);
-                }
+                    break;
+                case 'Supprimer':
+                    const index = this.toolbar.textElements.findIndex(el => el.id === currentTextElement.id);
+                    if (index > -1) {
+                        this.toolbar.textElements.splice(index, 1);
+                        this.updatePropertiesJSON();
+                        this.redrawPreviewCanvas();
+                    }
+                    break;
             }
         };
 
+        menu.appendChild(button);
+    });
 
-nodeType.prototype.getHandleAtPos = function(e) {
-            if (!this.movingLayer || !this.movingLayerBounds || !this.previewCanvas) return null;
-            
-            const rect = this.previewCanvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            const handleSize = 12;
-            const bounds = this.movingLayerBounds;
-            
-            // --- NOUVEAU : Logique pour la rotation ---
-            const props = this.layer_properties[this.movingLayer];
-            const angleInRadians = (props.rotation || 0) * Math.PI / 180;
-            const centerX = bounds.x + bounds.w / 2;
-            const centerY = bounds.y + bounds.h / 2;
+    document.body.appendChild(menu);
 
-            // On "dé-pivote" les coordonnées de la souris pour les comparer aux poignées
-            const cos = Math.cos(-angleInRadians);
-            const sin = Math.sin(-angleInRadians);
-            const dx = mouseX - centerX;
-            const dy = mouseY - centerY;
-            const rotatedMouseX = dx * cos - dy * sin + centerX;
-            const rotatedMouseY = dx * sin + dy * cos + centerY;
-            
-            // Poignée de rotation
-            const rotHandleSize = 16;
-            const rotHandleX = centerX;
-            const rotHandleY = bounds.y - 20; // Position au-dessus du cadre
-            if (rotatedMouseX >= rotHandleX - rotHandleSize / 2 && rotatedMouseX <= rotHandleX + rotHandleSize / 2 &&
-                rotatedMouseY >= rotHandleY - rotHandleSize / 2 && rotatedMouseY <= rotHandleY + rotHandleSize) {
-                return "rotate";
-            }
-
-            // Poignées de redimensionnement (avec les coordonnées de la souris "dé-pivotées")
-            const corners = {
-                tl: { x: bounds.x, y: bounds.y },
-                tr: { x: bounds.x + bounds.w, y: bounds.y },
-                bl: { x: bounds.x, y: bounds.y + bounds.h },
-                br: { x: bounds.x + bounds.w, y: bounds.y + bounds.h }
-            };
-
-            for (const key in corners) {
-                const corner = corners[key];
-                const handleX = corner.x - handleSize / 2;
-                const handleY = corner.y - handleSize / 2;
-                if (rotatedMouseX >= handleX && rotatedMouseX <= handleX + handleSize &&
-                    rotatedMouseY >= handleY && rotatedMouseY <= handleY + handleSize) {
-                    return key;
-                }
-            }
-            return null;
-        };
-
-
+    const closeMenuHandler = (e) => {
+        if (!menu.contains(e.target)) {
+            menu.remove();
+            document.removeEventListener('mousedown', closeMenuHandler, true);
+        }
+    };
+    
+    setTimeout(() => document.addEventListener('mousedown', closeMenuHandler, true), 0);
+};
 
 nodeType.prototype.onCanvasMouseDown = function(e) {
-            if (!this.movingLayer) return;
-            
-            const props = this.layer_properties[this.movingLayer];
-            if (!props) return;
+	console.log("---");
+    console.log("1. Clic détecté sur le canvas.");
+    const mouseX = e.offsetX;
+    const mouseY = e.offsetY;
 
-            const handle = this.getHandleAtPos(e);
+    if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
+        this.toolbar.handleClick(e, mouseX, mouseY);
+        return;
+    }
 
-            if (handle && handle !== 'rotate') { // Si c'est une poignée de redimensionnement
-                this.interactionMode = "scaling_" + handle;
-                this.dragStart = { x: e.clientX, y: e.clientY };
-                this.initialScale = props.scale;
-                this.initialOffsets = { x: props.offset_x, y: props.offset_y };
-                this.initialBounds = { ...this.movingLayerBounds };
-                this.layerAspectRatio = this.initialBounds.w / this.initialBounds.h;
+    if (this.toolbar.activeTool) {
+		console.log("2. Condition 'this.toolbar.activeTool' est VRAIE. Appel de handleCanvasClick...");
+        this.toolbar.handleCanvasClick(e);
+        return;
+    }
 
-            } else if (handle === 'rotate') { // Si c'est la poignée de rotation
-                this.interactionMode = "rotating";
-                const rect = this.previewCanvas.getBoundingClientRect();
-                const mouseX = e.clientX - rect.left;
-                const mouseY = e.clientY - rect.top;
-                const centerX = this.movingLayerBounds.x + this.movingLayerBounds.w / 2;
-                const centerY = this.movingLayerBounds.y + this.movingLayerBounds.h / 2;
-                this.dragStartAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
-                this.initialRotation = props.rotation || 0;
+    if (!this.movingLayer) {
+		console.log("-> Arrêt : Aucun outil actif et aucun calque en mouvement.");
+        return;
+    }
 
-            } else { // Sinon, c'est un déplacement
-                this.interactionMode = "moving";
-                this.isDragging = true;
-                this.dragStart = { x: e.clientX, y: e.clientY };
-                this.initialOffsets = { x: props.offset_x, y: props.offset_y };
-            }
-            
-            e.preventDefault();
-            e.stopPropagation();
-        };
+    const props = this.layer_properties[this.movingLayer];
+    if (!props) return;
 
-nodeType.prototype.onCanvasMouseMove = function(e) {
-            // Logique de verrouillage du curseur
+    const handle = this.getHandleAtPos(e);
+
+    if (handle && handle !== 'rotate') {
+        this.interactionMode = "scaling_" + handle;
+        this.dragStart = { x: e.clientX, y: e.clientY };
+        this.initialScale = props.scale;
+        this.initialOffsets = { x: props.offset_x, y: props.offset_y };
+        this.initialBounds = { ...this.movingLayerBounds };
+        this.layerAspectRatio = this.initialBounds.w / this.initialBounds.h;
+} else if (handle === 'rotate') {
+    this.interactionMode = "rotating";
+    const props = this.layer_properties[this.movingLayer];
+    const mouseX = e.offsetX;
+    const mouseY = e.offsetY;
+    const centerX = this.movingLayerBounds.x + this.movingLayerBounds.w / 2;
+    const centerY = this.movingLayerBounds.y + this.movingLayerBounds.h / 2;
+    this.dragStartAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
+    this.initialRotation = props.rotation || 0;
+} else {
+        this.interactionMode = "moving";
+        this.isDragging = true;
+        this.dragStart = { x: e.clientX, y: e.clientY };
+        this.initialOffsets = { x: props.offset_x, y: props.offset_y };
+    }
+    
+    e.preventDefault();
+    e.stopPropagation();
+};
+
+nodeType.prototype.getHandleAtPos = function(e) {
+    if (!this.movingLayer || !this.movingLayerBounds || !this.previewCanvas) return null;
+    
+    const mouseX = e.offsetX;
+    const mouseY = e.offsetY;
+
+    const handleSize = 12;
+    const bounds = this.movingLayerBounds;
+    
+    const props = this.layer_properties[this.movingLayer];
+    const angleInRadians = (props.rotation || 0) * Math.PI / 180;
+    const centerX = bounds.x + bounds.w / 2;
+    const centerY = bounds.y + bounds.h / 2;
+
+    const cos = Math.cos(-angleInRadians);
+    const sin = Math.sin(-angleInRadians);
+    const dx = mouseX - centerX;
+    const dy = mouseY - centerY;
+    const rotatedMouseX = dx * cos - dy * sin + centerX;
+    const rotatedMouseY = dx * sin + dy * cos + centerY;
+    
+    const rotHandleSize = 16;
+    const rotHandleX_unrotated = bounds.x + bounds.w / 2;
+    const rotHandleY_unrotated = bounds.y - 20;
+    
+    if (rotatedMouseX >= rotHandleX_unrotated - rotHandleSize / 2 && rotatedMouseX <= rotHandleX_unrotated + rotHandleSize / 2 &&
+        rotatedMouseY >= rotHandleY_unrotated - rotHandleSize / 2 && rotatedMouseY <= rotHandleY_unrotated + rotHandleSize / 2) {
+        return "rotate";
+    }
+
+    const corners = {
+        tl: { x: bounds.x, y: bounds.y },
+        tr: { x: bounds.x + bounds.w, y: bounds.y },
+        bl: { x: bounds.x, y: bounds.y + bounds.h },
+        br: { x: bounds.x + bounds.w, y: bounds.y + bounds.h }
+    };
+
+    for (const key in corners) {
+        const corner = corners[key];
+        const handleX = corner.x;
+        const handleY = corner.y;
+
+        if (rotatedMouseX >= handleX - handleSize/2 && rotatedMouseX <= handleX + handleSize/2 &&
+            rotatedMouseY >= handleY - handleSize/2 && rotatedMouseY <= handleY + handleSize/2) {
+            return key;
+        }
+    }
+    return null;
+};
+        
+        nodeType.prototype.onCanvasMouseMove = function(e) {
+	    if (this.textActionMode === 'moving' && this.activeTextObject) {
+ if (this.isTextDragging && this.activeTextObject) {
+        this.activeTextObject.x = e.offsetX + this.dragOffset.x;
+        this.activeTextObject.y = e.offsetY + this.dragOffset.y;
+        this.redrawPreviewCanvas();
+        return;
+    }
+		}
             if (this.interactionMode.startsWith("scaling_")) {
                 if (this.interactionMode === "scaling_tl" || this.interactionMode === "scaling_br") {
                     this.previewCanvas.style.cursor = "nwse-resize";
@@ -293,14 +862,15 @@ nodeType.prototype.onCanvasMouseMove = function(e) {
             } else if (this.interactionMode === "moving") {
                 this.previewCanvas.style.cursor = "move";
             } else if (this.interactionMode === "rotating") {
-                // --- MODIFICATION CURSEUR ROTATION ---
                 this.previewCanvas.style.cursor = rotateCursorStyle;
             } else {
                 if (this.movingLayer) {
-                    const handle = this.getHandleAtPos(e);
+                    const rect = this.previewCanvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+                    const handle = this.getHandleAtPos(e, mouseX, mouseY);
                     if (handle === "tl" || handle === "br") { this.previewCanvas.style.cursor = "nwse-resize"; }
                     else if (handle === "tr" || handle === "bl") { this.previewCanvas.style.cursor = "nesw-resize"; }
-                    // --- MODIFICATION CURSEUR ROTATION ---
                     else if (handle === "rotate") { this.previewCanvas.style.cursor = rotateCursorStyle; }
                     else { this.previewCanvas.style.cursor = "move"; }
                 } else {
@@ -323,13 +893,11 @@ nodeType.prototype.onCanvasMouseMove = function(e) {
                 const scaleFactor = (baseImg.naturalWidth / this.movingLayerBounds.w) * props.scale;
                 props.offset_x = Math.round(this.initialOffsets.x + (dx * scaleFactor));
                 props.offset_y = Math.round(this.initialOffsets.y + (dy * scaleFactor));
-
             } else if (this.interactionMode.startsWith("scaling_")) {
                 const angleInRadians = (props.rotation || 0) * Math.PI / 180;
                 const cos = Math.cos(-angleInRadians);
                 const sin = Math.sin(-angleInRadians);
                 const local_dx = dx * cos - dy * sin;
-
                 let newWidth;
                 
                 if (this.interactionMode === 'scaling_br' || this.interactionMode === 'scaling_tr') {
@@ -343,37 +911,20 @@ nodeType.prototype.onCanvasMouseMove = function(e) {
                 const newScale = this.initialScale * (newWidth / this.initialBounds.w);
                 props.scale = newScale;
 
-                const newHeight = newWidth / this.layerAspectRatio;
-                const dh = newHeight - this.initialBounds.h;
-                
-                let dx_offset = 0;
-                let dy_offset = 0;
-
-                if (this.interactionMode === 'scaling_tl') {
-                    dx_offset = dx;
-                    dy_offset = -dh;
-                } else if (this.interactionMode === 'scaling_tr') {
-                    dy_offset = -dh;
-                } else if (this.interactionMode === 'scaling_bl') {
-                    dx_offset = dx;
-                }
-
-                props.offset_x = Math.round(this.initialOffsets.x + (dx_offset / this.previewCanvasScale));
-                props.offset_y = Math.round(this.initialOffsets.y + (dy_offset / this.previewCanvasScale));
-            
-            } else if (this.interactionMode === "rotating") {
-                const rect = this.previewCanvas.getBoundingClientRect();
-                const mouseX = e.clientX - rect.left;
-                const mouseY = e.clientY - rect.top;
-                const centerX = this.movingLayerBounds.x + this.movingLayerBounds.w / 2;
-                const centerY = this.movingLayerBounds.y + this.movingLayerBounds.h / 2;
-
-                const currentAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
-                const angleDiff = currentAngle - this.dragStartAngle;
-                
-                props.rotation = this.initialRotation + (angleDiff * 180 / Math.PI);
-            }
-            
+ } else if (this.interactionMode === "rotating") {
+    const mouseX = e.offsetX;
+    const mouseY = e.offsetY;
+    const centerX = this.movingLayerBounds.x + this.movingLayerBounds.w / 2;
+    const centerY = this.movingLayerBounds.y + this.movingLayerBounds.h / 2;
+    const currentMouseAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
+    const angleDifference = currentMouseAngle - this.dragStartAngle;
+    const props = this.layer_properties[this.movingLayer];
+    props.rotation = this.initialRotation + (angleDifference * 180 / Math.PI);
+    const rotationWidget = this.widgets.find(w => w.name === `rotation_${this.movingLayer}`);
+    if(rotationWidget) rotationWidget.value = props.rotation;
+    
+    this.redrawPreviewCanvas();
+}
             const scaleWidget = this.widgets.find(w => w.name === `scale_${this.movingLayer}`);
             if(scaleWidget) scaleWidget.value = props.scale;
             const offsetXWidget = this.widgets.find(w => w.name === `offset_x_${this.movingLayer}`);
@@ -387,7 +938,14 @@ nodeType.prototype.onCanvasMouseMove = function(e) {
             this.redrawPreviewCanvas();
         };
 
-        nodeType.prototype.onCanvasMouseUp = function(e) {
+      nodeType.prototype.onCanvasMouseUp = function(e) {
+      if (this.isTextDragging) {
+        this.updatePropertiesJSON();
+        this.textActionMode = 'none';
+        this.activeTextObject = null;
+        this.isTextDragging = false;
+        this.redrawPreviewCanvas();
+    }
             if (this.interactionMode !== "none") {
                 this.isDragging = false;
                 this.interactionMode = "none";
@@ -405,206 +963,7 @@ nodeType.prototype.onCanvasMouseMove = function(e) {
                 this.updatePropertiesJSON();
             }
         };
-
-nodeType.prototype.redrawPreviewCanvas = function() {
-            if (!this.previewCanvas) return;
-            const canvas = this.previewCanvas;
-            const ctx = this.previewCtx;
-            const rect = canvas.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) return;
-            if (canvas.width !== rect.width || canvas.height !== rect.height) {
-                canvas.width = rect.width;
-                canvas.height = rect.height;
-            }
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = "black";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            if (this.basePreviewImage && this.basePreviewImage.naturalWidth > 0) {
-                const img = this.basePreviewImage;
-                const imgRatio = img.naturalWidth / img.naturalHeight;
-                const canvasRatio = canvas.width / canvas.height;
-                let destWidth, destHeight, destX, destY;
-                if (imgRatio > canvasRatio) {
-                    destWidth = canvas.width; destHeight = canvas.width / imgRatio;
-                    destX = 0; destY = (canvas.height - destHeight) / 2;
-                } else {
-                    destHeight = canvas.height; destWidth = canvas.height * imgRatio;
-                    destY = 0; destX = (canvas.width - destWidth) / 2;
-                }
-                ctx.drawImage(img, destX, destY, destWidth, destHeight);
-                this.previewCanvasScale = destWidth / this.basePreviewImage.naturalWidth;
-
-                const sortedLayerNames = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).map(i => i.name);
-                
-                for (const layerName of sortedLayerNames) {
-                    const props = this.layer_properties[layerName];
-                    const layerImage = this.loaded_preview_images[layerName];
-                    // --- DEBUT LOGIQUE MASQUE ---
-                    const maskName = layerName.replace("layer_", "mask_");
-                    const maskImage = this.loaded_preview_images[maskName];
-                    // --- FIN LOGIQUE MASQUE ---
-
-                    if (!props || !props.enabled || !layerImage || !layerImage.naturalWidth || !layerImage.naturalHeight) {
-                        continue;
-                    }
-
-                    ctx.save();
-                    
-                    let imageToDraw = layerImage;
-                    if (props.brightness !== 0.0 || props.contrast !== 0.0 || props.saturation !== 1.0 || props.color_r !== 1.0 || props.color_g !== 1.0 || props.color_b !== 1.0) {
-                        try {
-                            const tempCanvas = document.createElement('canvas');
-                            tempCanvas.width = layerImage.naturalWidth; tempCanvas.height = layerImage.naturalHeight;
-                            const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-                            tempCtx.drawImage(layerImage, 0, 0);
-                            const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-                            const data = imageData.data;
-                            const brightness = props.brightness, contrastFactor = 1.0 + props.contrast, saturation = props.saturation, color_r = props.color_r, color_g = props.color_g, color_b = props.color_b;
-                            for (let i = 0; i < data.length; i += 4) {
-                                let r = data[i] / 255.0, g = data[i + 1] / 255.0, b = data[i + 2] / 255.0;
-                                if (brightness !== 0.0) { r += brightness; g += brightness; b += brightness; }
-                                if (props.contrast !== 0.0) { r = (r - 0.5) * contrastFactor + 0.5; g = (g - 0.5) * contrastFactor + 0.5; b = (b - 0.5) * contrastFactor + 0.5; }
-                                if (color_r !== 1.0 || color_g !== 1.0 || color_b !== 1.0) { r *= color_r; g *= color_g; b *= color_b; }
-                                if (saturation !== 1.0) { const gray = r * 0.299 + g * 0.587 + b * 0.114; r = gray * (1.0 - saturation) + r * saturation; g = gray * (1.0 - saturation) + g * saturation; b = gray * (1.0 - saturation) + b * saturation; }
-                                data[i] = Math.max(0, Math.min(255, r * 255)); data[i + 1] = Math.max(0, Math.min(255, g * 255)); data[i + 2] = Math.max(0, Math.min(255, b * 255));
-                            }
-                            tempCtx.putImageData(imageData, 0, 0);
-                            imageToDraw = tempCanvas;
-                        } catch (e) {
-                            console.error(`[LayerSystem] ERREUR lors du traitement du calque ${layerName}:`, e);
-                            imageToDraw = layerImage;
-                        }
-                    }
-
-                    // --- DEBUT LOGIQUE MASQUE ---
-                    let finalImageToDraw = imageToDraw;
-                    if (maskImage && maskImage.naturalWidth > 0) {
-                        let maskToApply = maskImage;
-                        if (props.invert_mask) {
-                            const invertedMaskCanvas = document.createElement('canvas');
-                            invertedMaskCanvas.width = maskImage.naturalWidth;
-                            invertedMaskCanvas.height = maskImage.naturalHeight;
-                            const invertedCtx = invertedMaskCanvas.getContext('2d');
-                            invertedCtx.filter = 'invert(1)';
-                            invertedCtx.drawImage(maskImage, 0, 0);
-                            maskToApply = invertedMaskCanvas;
-                        }
-                        finalImageToDraw = applyMask(imageToDraw, maskToApply);
-                    }
-                    // --- FIN LOGIQUE MASQUE ---
-
-                    let final_sx = 0, final_sy = 0, final_sw = finalImageToDraw.width, final_sh = finalImageToDraw.height;
-                    let final_dx = destX, final_dy = destY, final_dw = destWidth, final_dh = destHeight;
-                    
-                    if (props.resize_mode === 'crop') {
-                        final_dw = final_sw * props.scale * this.previewCanvasScale;
-                        final_dh = final_sh * props.scale * this.previewCanvasScale;
-                        final_dx = destX + (props.offset_x * this.previewCanvasScale) - final_dw/2 + destWidth/2;
-                        final_dy = destY + (props.offset_y * this.previewCanvasScale) - final_dh/2 + destHeight/2;
-                    } else {
-                         const layerRatio = final_sw / final_sh;
-                         const destContainerRatio = destWidth / destHeight;
-                         switch(props.resize_mode) {
-                             case 'fit':
-                                 if (layerRatio > destContainerRatio) { final_dh = final_dw / layerRatio; final_dy += (destHeight - final_dh) / 2; }
-                                 else { final_dw = final_dh * layerRatio; final_dx += (destWidth - final_dw) / 2; }
-                                 break;
-                             case 'cover':
-                                 if (layerRatio > destContainerRatio) { 
-                                     final_sw = final_sh * destContainerRatio; 
-                                     final_sx = (finalImageToDraw.width - final_sw) / 2; 
-                                 } else { 
-                                     final_sh = final_sw / destContainerRatio; 
-                                     final_sy = (finalImageToDraw.height - final_sh) / 2; 
-                                 }
-                                 break;
-                             case 'stretch': default: break;
-                         }
-                    }
-                    
-                    ctx.globalAlpha = props.opacity;
-                    ctx.globalCompositeOperation = props.blend_mode === 'normal' ? 'source-over' : props.blend_mode;
-
-                    if (props.resize_mode === 'crop') {
-                        const centerX = final_dx + final_dw / 2;
-                        const centerY = final_dy + final_dh / 2;
-                        
-                        ctx.save();
-                        ctx.translate(centerX, centerY);
-                        const angleInRadians = (props.rotation || 0) * Math.PI / 180;
-                        ctx.rotate(angleInRadians);
-
-                        ctx.drawImage(finalImageToDraw, final_sx, final_sy, final_sw, final_sh, -final_dw / 2, -final_dh / 2, final_dw, final_dh);
-
-                        if (this.movingLayer === layerName) {
-                            ctx.strokeStyle = "red"; 
-                            ctx.lineWidth = 2; 
-                            ctx.strokeRect(-final_dw / 2, -final_dh / 2, final_dw, final_dh);
-                            
-                            this.movingLayerBounds = { x: final_dx, y: final_dy, w: final_dw, h: final_dh, center_x: centerX, center_y: centerY };
-                            
-                            const handleSize = 8;
-                            ctx.fillStyle = "white";
-                            ctx.strokeStyle = "black";
-                            ctx.lineWidth = 1;
-                            const corners = [
-                                {x: -final_dw/2, y: -final_dh/2}, {x: final_dw/2, y: -final_dh/2},
-                                {x: -final_dw/2, y: final_dh/2}, {x: final_dw/2, y: final_dh/2}
-                            ];
-                            for(const corner of corners) {
-                                ctx.fillRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
-                                ctx.strokeRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
-                            }
-                            
-                            const rotHandleOffset = 20;
-                            const rotHandleY = -final_dh/2 - rotHandleOffset;
-                            
-                            ctx.beginPath();
-                            ctx.moveTo(0, -final_dh/2);
-                            ctx.lineTo(0, rotHandleY);
-                            ctx.strokeStyle = "red";
-                            ctx.lineWidth = 2;
-                            ctx.stroke();
-
-                            ctx.beginPath();
-                            ctx.arc(0, rotHandleY, handleSize / 2, 0, 2 * Math.PI);
-                            ctx.fillStyle = "white";
-                            ctx.fill();
-                            ctx.strokeStyle = "black";
-                            ctx.lineWidth = 1;
-                            ctx.stroke();
-                        }
-                        
-                        ctx.restore(); 
-                    } else {
-                        ctx.drawImage(finalImageToDraw, final_sx, final_sy, final_sw, final_sh, final_dx, final_dy, final_dw, final_dh);
-                    }
-                    
-                    ctx.restore();
-                }
-            }
-        };
         
-        const onConfigure = nodeType.prototype.onConfigure;
-        nodeType.prototype.onConfigure = function (info) {
-            onConfigure?.apply(this, arguments);
-            if (info.widgets_values) {
-                const p_widget = this.widgets.find(w => w.name === "_properties_json");
-                const p_index = this.widgets.indexOf(p_widget);
-                if (p_index > -1 && info.widgets_values[p_index]) {
-                    try { this.layer_properties = JSON.parse(info.widgets_values[p_index]); }
-                    catch (e) { this.layer_properties = {}; }
-                }
-            }
-        };
-        
-        const onConnectionsChange = nodeType.prototype.onConnectionsChange;
-        nodeType.prototype.onConnectionsChange = function (side, slot, is_connected, link_info, io_slot) {
-            onConnectionsChange?.apply(this, arguments);
-            if (side === 1) { setTimeout(() => this.refreshUI(), 0); }
-        };
-
         nodeType.prototype.initializeHeaderCanvases = function() {
             for (let i = 1; i <= MAX_LAYERS; i++) {
                 const layerName = `layer_${i}`;
@@ -616,13 +975,8 @@ nodeType.prototype.redrawPreviewCanvas = function() {
                 anchor.canvas = canvas;
                 
                 const container = anchor.inputEl.parentElement;
-
-                // --- MODIFICATION APPROCHE 1 (En-têtes) ---
-                // On vide plus le conteneur. On cache l'ancien élément et on ajoute le nôtre.
                 anchor.inputEl.style.display = "none";
                 container.appendChild(canvas);
-                // --- FIN DE LA MODIFICATION ---
-
                 container.style.padding = "0px";
                 container.style.margin = "0px";
                 
@@ -673,15 +1027,13 @@ nodeType.prototype.redrawPreviewCanvas = function() {
                     } else if (isInDownArrow) {
                         const total_layers = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).length;
                         if (layer_index < total_layers) { this.moveLayer(layer_index, "down"); }
-                    } else if (isInMoveIcon) {
-                        if (props.resize_mode === 'crop') {
-                            if (this.movingLayer === layerName) {
-                                this.movingLayer = null;
-                            } else {
-                                this.movingLayer = layerName;
-                            }
-                            this.refreshUI();
+                    } else if (isInMoveIcon && props.resize_mode === 'crop' && (!this.toolbar || !this.toolbar.activeTool)) {
+                        if (this.movingLayer === layerName) {
+                            this.movingLayer = null;
+                        } else {
+                            this.movingLayer = layerName;
                         }
+                        this.refreshUI();
                     } else {
                         const isExpanding = props.layer_collapsed;
 
@@ -796,7 +1148,9 @@ nodeType.prototype.redrawPreviewCanvas = function() {
             ctx.save();
             ctx.translate(moveIconX, moveIconY);
             ctx.scale(moveIconSize / 24, moveIconSize / 24);
-            ctx.strokeStyle = isMoving ? "#F44" : (props.resize_mode === 'crop' ? LiteGraph.WIDGET_TEXT_COLOR : disabledColor);
+            ctx.strokeStyle = isMoving 
+                ? "#F44"
+                : (props.resize_mode !== 'crop' || (this.toolbar && this.toolbar.activeTool) ? disabledColor : LiteGraph.WIDGET_TEXT_COLOR);
             ctx.lineWidth = 2;
             ctx.stroke(moveIconPath);
             ctx.restore();
@@ -829,7 +1183,7 @@ nodeType.prototype.redrawPreviewCanvas = function() {
             if (!props.enabled) { ctx.stroke(eyeSlashPath); }
             ctx.restore();
         };
-
+        
         nodeType.prototype.updateLayerVisibility = function(layerName) {
             const props = this.layer_properties[layerName];
             if (!props) return;
@@ -851,23 +1205,21 @@ nodeType.prototype.redrawPreviewCanvas = function() {
                 if (w.name.startsWith("spacer_for_")) {
                     isHidden = false;
                 } else if (w.name === `toggle_color_${layerName}`) {
+
                 } else if (["brightness", "contrast", "saturation", "color_r", "color_g", "color_b"].some(p => w.name.startsWith(p))) {
                     isHidden = isLayerCollapsed || isColorCollapsed;
-                } else if (["scale", "offset_x", "offset_y", "rotation"].some(p => w.name.startsWith(p)) || w.name === `move_btn_${layerName}`) {
-                // --- FIN MODIFICATION ---
-                    isHidden = isLayerCollapsed || !showTransformForCrop;
-                
-                } else if (w.value === `move_btn_${layerName}`){
+                } else if (["scale", "offset_x", "offset_y", "rotation"].some(p => w.name.startsWith(p))) {
                     isHidden = isLayerCollapsed || !showTransformForCrop;
                 }
                 
                 w.hidden = isHidden;
+                if (!w.originalComputeSize) w.originalComputeSize = w.computeSize;
                 w.computeSize = isHidden ? () => [0, -4] : w.originalComputeSize;
             }
             
             resizeHeight.call(this);
         };
-
+        
         nodeType.prototype.refreshUI = function() {
             this.handleDisconnectedInputs();
             this.updateLayerWidgets();
@@ -936,98 +1288,95 @@ nodeType.prototype.redrawPreviewCanvas = function() {
             this.redrawPreviewCanvas();
         };
 
-        nodeType.prototype.addLayerWidgets = function(layer_name) {
-            if (!this.layer_properties[layer_name]) {
-                this.layer_properties[layer_name] = {
-                    blend_mode: "normal", opacity: 1.0, enabled: true, resize_mode: "fit", scale: 1.0, offset_x: 0, offset_y: 0,
-					rotation: 0.0,
-                    brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0, 
-                    invert_mask: false, color_section_collapsed: true, layer_collapsed: true,
-                };
-            }
-            const props = this.layer_properties[layer_name];
-            
-            const allWidgets = [];
-
-            const topSpacer = { name: `top_spacer_for_${layer_name}`, type: "CUSTOM_SPACER", draw: () => {}, computeSize: () => [0, 10] };
-            this.widgets.push(topSpacer);
-            allWidgets.push(topSpacer);
-
-            allWidgets.push(this.addWidget("combo", `blend_mode_${layer_name}`, props.blend_mode, (v) => { props.blend_mode = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); }, {values: BLEND_MODES}));
-            allWidgets.push(this.addWidget("number", `opacity_${layer_name}`, props.opacity, (v) => { props.opacity = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); }, {min: 0.0, max: 1.0, step: 0.1, precision: 2}));
-            const colorToggle = this.addWidget("toggle", `toggle_color_${layer_name}`, !props.color_section_collapsed, (v) => {
-                props.color_section_collapsed = !v; this.updateLayerVisibility(layer_name); this.updatePropertiesJSON();
-            }, { on: "▼ Color Adjust", off: "▶ Color Adjust" });
-            allWidgets.push(colorToggle);
-            //const redrawCallback = (prop, v) => { props[prop] = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); };
-            const redrawCallback = (prop, v) => { 
-                props[prop] = v; 
-                this.updatePropertiesJSON(); 
-                this.redrawPreviewCanvas(); 
-                this.graph.setDirtyCanvas(true, true);
-            };
-			
-			
-			allWidgets.push(this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => redrawCallback('brightness', v), { label: "Brightness", min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
-            allWidgets.push(this.addWidget("number", `contrast_${layer_name}`, props.contrast, (v) => redrawCallback('contrast', v), { label: "Contrast", min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
-            allWidgets.push(this.addWidget("number", `saturation_${layer_name}`, props.saturation, (v) => redrawCallback('saturation', v), { label: "Saturation", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
-            allWidgets.push(this.addWidget("number", `color_r_${layer_name}`, props.color_r, (v) => redrawCallback('color_r', v), { label: "R", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
-            allWidgets.push(this.addWidget("number", `color_g_${layer_name}`, props.color_g, (v) => redrawCallback('color_g', v), { label: "G", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
-            allWidgets.push(this.addWidget("number", `color_b_${layer_name}`, props.color_b, (v) => redrawCallback('color_b', v), { label: "B", min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
-            allWidgets.push(this.addWidget("toggle", `invert_mask_${layer_name}`, !!props.invert_mask, (v) => { 
-                props.invert_mask = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas();
-            }, { label: "Invert Mask" }));
-            const resizeModeWidget = this.addWidget("combo", `resize_mode_${layer_name}`, props.resize_mode, (v) => {
-                props.resize_mode = v; if (v !== 'crop' && this.movingLayer === layer_name) { this.movingLayer = null; }
-                this.updateLayerVisibility(layer_name); this.updatePropertiesJSON(); this.redrawPreviewCanvas();
-            }, { values: RESIZE_MODES });
-            allWidgets.push(resizeModeWidget);
-            allWidgets.push(this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => redrawCallback('scale', v), { min: 0.01, max: 10.0, step: 0.1, precision: 2 }));
-            allWidgets.push(this.addWidget("number", `offset_x_${layer_name}`, props.offset_x, (v) => redrawCallback('offset_x', v), { min: -8192, max: 8192, step: 1 }));
-            allWidgets.push(this.addWidget("number", `offset_y_${layer_name}`, props.offset_y, (v) => redrawCallback('offset_y', v), { min: -8192, max: 8192, step: 1 }));
-            allWidgets.push(this.addWidget("number", `rotation_${layer_name}`, props.rotation, (v) => redrawCallback('rotation', v), {min: -360.0, max: 360.0, step: 1, precision: 1 }));
-            const bottomSpacer = { name: `bottom_spacer_for_${layer_name}`, type: "CUSTOM_SPACER", draw: () => {}, computeSize: () => [0, 10] };
-            this.widgets.push(bottomSpacer);
-            allWidgets.push(bottomSpacer);
-
-            for (const w of allWidgets) { 
-                w.originalComputeSize = w.computeSize;
-            }
+nodeType.prototype.addLayerWidgets = function(layer_name) {
+    if (!this.layer_properties[layer_name]) {
+        this.layer_properties[layer_name] = {
+            blend_mode: "normal", opacity: 1.0, enabled: true, resize_mode: "fit", scale: 1.0, offset_x: 0, offset_y: 0,
+            rotation: 0.0,
+            brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0, 
+            invert_mask: false, color_section_collapsed: true, layer_collapsed: true,
         };
+    }
+    const props = this.layer_properties[layer_name];
+    const allWidgets = [];
+    const topSpacer = { name: `top_spacer_for_${layer_name}`, type: "CUSTOM_SPACER", draw: () => {}, computeSize: () => [0, 10] };
+    this.widgets.push(topSpacer);
+    allWidgets.push(topSpacer);
+
+    const redrawCallback = (prop, v) => { 
+        props[prop] = v; 
+        this.updatePropertiesJSON(); 
+        this.redrawPreviewCanvas(); 
+        this.graph.setDirtyCanvas(true, true);
+    };
+    
+    allWidgets.push(this.addWidget("combo", `blend_mode_${layer_name}`, props.blend_mode, (v) => { props.blend_mode = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); }, {values: BLEND_MODES}));
+    allWidgets.push(this.addWidget("number", `opacity_${layer_name}`, props.opacity, (v) => { props.opacity = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas(); }, {min: 0.0, max: 1.0, step: 0.1, precision: 2}));
+    const colorToggle = this.addWidget("toggle", `toggle_color_${layer_name}`, !props.color_section_collapsed, (v) => {
+        props.color_section_collapsed = !v; this.refreshUI(); this.updatePropertiesJSON();
+    }, { on: "▼ Color Adjust", off: "▶ Color Adjust" });
+    allWidgets.push(colorToggle);
+    
+    allWidgets.push(this.addWidget("number", `brightness_${layer_name}`, props.brightness, (v) => redrawCallback('brightness', v), {min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
+    allWidgets.push(this.addWidget("number", `contrast_${layer_name}`, props.contrast, (v) => redrawCallback('contrast', v), {min: -1.0, max: 1.0, step: 0.1, precision: 2 }));
+    allWidgets.push(this.addWidget("number", `saturation_${layer_name}`, props.saturation, (v) => redrawCallback('saturation', v), {min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
+    allWidgets.push(this.addWidget("number", `color_r_${layer_name}`, props.color_r, (v) => redrawCallback('color_r', v), {min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
+    allWidgets.push(this.addWidget("number", `color_g_${layer_name}`, props.color_g, (v) => redrawCallback('color_g', v), {min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
+    allWidgets.push(this.addWidget("number", `color_b_${layer_name}`, props.color_b, (v) => redrawCallback('color_b', v), {min: 0.0, max: 2.0, step: 0.1, precision: 2 }));
+    allWidgets.push(this.addWidget("toggle", `invert_mask_${layer_name}`, !!props.invert_mask, (v) => { 
+        props.invert_mask = v; this.updatePropertiesJSON(); this.redrawPreviewCanvas();
+    }));
+    const resizeModeWidget = this.addWidget("combo", `resize_mode_${layer_name}`, props.resize_mode, (v) => {
+        props.resize_mode = v; if (v !== 'crop' && this.movingLayer === layer_name) { this.movingLayer = null; }
+        this.refreshUI();		
+		this.updatePropertiesJSON(); this.redrawPreviewCanvas();
+    }, { values: RESIZE_MODES });
+    allWidgets.push(resizeModeWidget);
+    allWidgets.push(this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => redrawCallback('scale', v), {min: 0.01, max: 10.0, step: 0.1, precision: 2 }));
+    allWidgets.push(this.addWidget("number", `offset_x_${layer_name}`, props.offset_x, (v) => redrawCallback('offset_x', v), {min: -8192, max: 8192, step: 1 }));
+    allWidgets.push(this.addWidget("number", `offset_y_${layer_name}`, props.offset_y, (v) => redrawCallback('offset_y', v), {min: -8192, max: 8192, step: 1 }));
+    allWidgets.push(this.addWidget("number", `rotation_${layer_name}`, props.rotation, (v) => redrawCallback('rotation', v), {min: -360.0, max: 360.0, step: 1, precision: 1 }));
+
+    const bottomSpacer = { name: `bottom_spacer_for_${layer_name}`, type: "CUSTOM_SPACER", draw: () => {}, computeSize: () => [0, 10] };
+    this.widgets.push(bottomSpacer);
+    allWidgets.push(bottomSpacer);
+
+    for (const w of allWidgets) { 
+        if (!w.originalComputeSize) w.originalComputeSize = w.computeSize;
+    }
+};
         
         nodeType.prototype.updateLayerWidgets = function() {
             this.widgets = this.widgets.filter(w => w.name.includes("_anchor") || w.name === "_properties_json");
             const connectedInputs = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null);
             connectedInputs.sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1]));
+            
+            const existingWidgets = new Set();
+            for(const w of this.widgets) {
+                if (w.name.startsWith('blend_mode_')) existingWidgets.add(w.name.replace('blend_mode_', ''));
+            }
+
             for (const input of connectedInputs) {
-                this.addLayerWidgets(input.name);
+                if (!existingWidgets.has(input.name)) {
+                   this.addLayerWidgets(input.name);
+                }
             }
         };
 
         nodeType.prototype.handleDisconnectedInputs = function() {
             const connected_layer_names = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
-            const inputs_to_remove = [], props_to_remove = [];
+            const props_to_remove = [];
             for (const key in this.layer_properties) {
                 if (!connected_layer_names.has(key)) {
                     props_to_remove.push(key);
-                    const layer_input = this.inputs.find(i => i.name === key); if(layer_input) inputs_to_remove.push(layer_input);
-                    const mask_input = this.inputs.find(i => i.name === key.replace("layer_", "mask_")); if(mask_input) inputs_to_remove.push(mask_input);
                 }
             }
-            props_to_remove.forEach(key => delete this.layer_properties[key]);
-            inputs_to_remove.sort((a,b) => this.inputs.indexOf(b) - this.inputs.indexOf(a)).forEach(i => this.removeInput(this.inputs.indexOf(i)));
-            const new_props = {};
-            const remaining_layers = this.inputs.filter(i => i.name.startsWith("layer_"));
-            const remaining_masks = this.inputs.filter(i => i.name.startsWith("mask_"));
-            remaining_layers.sort((a,b)=> parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).forEach((input, i) => {
-                const old_name = input.name, new_name = `layer_${i + 1}`;
-                if(this.layer_properties[old_name]) new_props[new_name] = this.layer_properties[old_name];
-                const old_mask_name = old_name.replace("layer_", "mask_");
-                const mask_input = remaining_masks.find(m => m.name === old_mask_name);
-                if(mask_input) mask_input.name = new_name.replace("layer_", "mask_");
-                input.name = new_name;
+            props_to_remove.forEach(key => {
+                delete this.layer_properties[key];
+                if (this.movingLayer === key) this.movingLayer = null;
+                const widgets_to_remove = this.widgets.filter(w => w.name.endsWith(`_${key}`));
+                widgets_to_remove.forEach(w => this.widgets.splice(this.widgets.indexOf(w), 1));
             });
-            this.layer_properties = new_props;
         };
         
         nodeType.prototype.ensureWildcardInputs = function () {
@@ -1038,14 +1387,31 @@ nodeType.prototype.redrawPreviewCanvas = function() {
             if (!lastLayerInput || lastLayerInput.link !== null) {
                 const newIndex = lastLayerInput ? parseInt(lastLayerInput.name.split("_")[1]) + 1 : 1;
                 if (newIndex > MAX_LAYERS) return;
-                this.addInput(`layer_${newIndex}`, ["IMAGE", "MASK", "*"]);
+                this.addInput(`layer_${newIndex}`, "IMAGE");
                 this.addInput(`mask_${newIndex}`, "MASK");
             }
         };
         
-        nodeType.prototype.updatePropertiesJSON = function() { 
-            const p = this.widgets.find(w => w.name === "_properties_json"); 
-            if (p) { p.value = JSON.stringify(this.layer_properties); } 
+nodeType.prototype.updatePropertiesJSON = function() {
+    // 1. Mise à jour du widget de données principal
+    const mainDataWidget = this.widgets.find(w => w.name === "_layer_system_data" || w.name === "_properties_json");
+    if (mainDataWidget) {
+        const full_properties = {
+            layers: this.layer_properties,
+            texts: this.toolbar ? this.toolbar.getTexts() : [],
+            preview_width: this.previewCanvas ? this.previewCanvas.width : 512,
+            preview_height: this.previewCanvas ? this.previewCanvas.height : 512,
+            toolbar_width: this.toolbar ? this.toolbar.width : 0
         };
+        mainDataWidget.value = JSON.stringify(full_properties);
+    }
+
+    // 2. Neutralisation des widgets d'ancrage pour éviter les doublons
+    this.widgets.forEach(widget => {
+        if (widget.name.includes("_anchor")) {
+            widget.value = null;
+        }
+    });
+};
     },
 });
