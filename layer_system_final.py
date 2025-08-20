@@ -3,14 +3,13 @@ import torch.nn.functional as F
 import json
 import numpy as np
 import folder_paths
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw, ImageFont
 import os
 import http.server
 import socketserver
 import threading
 import math
 
-# --- LOGIQUE DU SERVEUR D'APERÇU ---
 preview_server_thread = None
 PREVIEW_SERVER_PORT = 8189
 
@@ -39,7 +38,6 @@ def start_preview_server():
         preview_server_thread = thread
         print(f"\n[Layer System] INFO: Démarrage du serveur d'aperçu local sur http://127.0.0.1:{PREVIEW_SERVER_PORT}")
 
-# --- FONCTIONS UTILITAIRES ---
 def tensor_to_pil(tensor):
     return Image.fromarray(np.clip(255. * tensor.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
 
@@ -77,11 +75,20 @@ def prepare_layer(top_image, base_image, resize_mode, scale, offset_x, offset_y)
         canvas_permuted = resized_top[:, :, y_start:src_y_end, x_start:src_x_end]
         return canvas_permuted.permute(0, 2, 3, 1)
     elif resize_mode == 'crop':
-        x_start, y_start = int(offset_x), int(offset_y)
-        src_x_start, src_y_start = int(max(0, -x_start)), int(max(0, -y_start))
-        dst_x_start, dst_y_start = int(max(0, x_start)), int(max(0, y_start))
-        copy_W = int(min(base_W - dst_x_start, top_W - src_x_start))
-        copy_H = int(min(base_H - dst_y_start, top_H - src_y_start))
+        x_start_abs = (base_W // 2) + offset_x
+        y_start_abs = (base_H // 2) + offset_y
+        
+        x_start_centered = x_start_abs - (top_W // 2)
+        y_start_centered = y_start_abs - (top_H // 2)
+
+        src_x_start = max(0, -x_start_centered)
+        src_y_start = max(0, -y_start_centered)
+        dst_x_start = max(0, x_start_centered)
+        dst_y_start = max(0, y_start_centered)
+
+        copy_W = min(base_W - dst_x_start, top_W - src_x_start)
+        copy_H = min(base_H - dst_y_start, top_H - src_y_start)
+
         if copy_W > 0 and copy_H > 0:
             src_slice = top_image[:, src_y_start:src_y_start+copy_H, src_x_start:src_x_start+copy_W, :]
             canvas[:, dst_y_start:dst_y_start+copy_H, dst_x_start:dst_x_start+copy_W, :] = src_slice
@@ -105,16 +112,13 @@ class LayerSystem:
         optional_inputs.update(header_anchors)
 
         return {
-            "required": {
-                "base_image": ("IMAGE",),
-            },
+            "required": { "base_image": ("IMAGE",), },
             "optional": optional_inputs
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "composite_layers"
     CATEGORY = "Layer System"
-    DESCRIPTION = "This custom node for ComfyUI provides a powerful and flexible dynamic layering system, similar to what you would find in image editing software like Photoshop."
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
@@ -150,7 +154,13 @@ class LayerSystem:
         if final_image.shape[-1] == 4:
             final_image = final_image[..., :3]
 
-        properties = json.loads(_properties_json)
+        try:
+            full_properties = json.loads(_properties_json)
+        except json.JSONDecodeError:
+            full_properties = {}
+        
+        layers_properties = full_properties.get("layers", {})
+
         layers = {k: v for k, v in kwargs.items() if k.startswith("layer_")}
         masks = {k: v for k, v in kwargs.items() if k.startswith("mask_")}
         sorted_layer_names = sorted(layers.keys())
@@ -158,7 +168,7 @@ class LayerSystem:
         for layer_name in sorted_layer_names:
             layer_image_full = layers.get(layer_name)
             if layer_image_full is None: continue
-
+            
             layer_pil = tensor_to_pil(layer_image_full)
             layer_filename = f"layersys_{layer_name}.png"
             layer_pil.save(os.path.join(temp_dir, layer_filename))
@@ -176,8 +186,8 @@ class LayerSystem:
                 mask_filename = f"layersys_{mask_name}.png"
                 mask_pil.save(os.path.join(temp_dir, mask_filename))
                 previews_data[mask_name] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{mask_filename}"
-            
-            props = properties.get(layer_name, {})
+
+            props = layers_properties.get(layer_name, {})
             if not props.get("enabled", True): continue
 
             resize_mode = props.get("resize_mode", "fit")
@@ -187,9 +197,9 @@ class LayerSystem:
             rotation = props.get("rotation", 0.0)
             
             prepared_layer = None
-            content_alpha_mask = None
+            layer_alpha = None
 
-            if resize_mode == 'crop':
+            if resize_mode == 'crop' and rotation != 0.0:
                 pil_layer = tensor_to_pil(layer_image_full)
                 if pil_layer.mode != 'RGBA':
                     pil_layer = pil_layer.convert('RGBA')
@@ -199,8 +209,7 @@ class LayerSystem:
                 if new_w > 0 and new_h > 0:
                     pil_layer = pil_layer.resize((new_w, new_h), Image.Resampling.BICUBIC)
                 
-                if rotation != 0.0:
-                    pil_layer = pil_layer.rotate(-rotation, resample=Image.Resampling.BICUBIC, expand=True)
+                pil_layer = pil_layer.rotate(-rotation, resample=Image.Resampling.BICUBIC, expand=True)
 
                 final_canvas_pil = Image.new('RGBA', (base_W, base_H), (0, 0, 0, 0))
                 paste_x = (base_W // 2) + offset_x - (pil_layer.width // 2)
@@ -210,16 +219,18 @@ class LayerSystem:
                 
                 prepared_tensor = pil_to_tensor(final_canvas_pil)
                 prepared_layer = prepared_tensor[..., :3]
-                content_alpha_mask = prepared_tensor[..., 3:4]
+                layer_alpha = prepared_tensor[..., 3:4]
             else:
                 if layer_image_full.shape[-1] == 4:
-                    layer_alpha_channel = layer_image_full[..., 3:4]
+                    layer_alpha = layer_image_full[..., 3:4]
                     layer_image = layer_image_full[..., :3]
-                    content_alpha_mask = prepare_layer(layer_alpha_channel, final_image, resize_mode, scale, offset_x, offset_y)
                 else:
                     layer_image = layer_image_full
                 
                 prepared_layer = prepare_layer(layer_image, final_image, resize_mode, scale, offset_x, offset_y)
+                if layer_alpha is not None:
+                    prepared_alpha = prepare_layer(layer_alpha, final_image, resize_mode, scale, offset_x, offset_y)
+                    layer_alpha = prepared_alpha
 
             brightness = props.get("brightness", 0.0)
             if brightness != 0.0: prepared_layer = torch.clamp(prepared_layer + brightness, 0.0, 1.0)
@@ -242,29 +253,17 @@ class LayerSystem:
             opacity = props.get("opacity", 1.0)
             blended_image = self._blend(final_image, prepared_layer, mode)
             
-            # --- START OF THE CORRECTION ---
-            # `blended_image` contains the blended result, but also the blended black background.
-            # We fix this by compositing it onto the `final_image` using the layer's own content shape.
-            # This creates a correct "top layer" before applying the user mask.
+            content_alpha_mask = layer_alpha
             if content_alpha_mask is None and resize_mode != 'stretch':
-                # If the layer had no alpha (e.g., a JPG), create a mask from its content.
                 content_alpha_mask = (prepared_layer.sum(dim=-1, keepdim=True) > 0.001).float()
             
             if content_alpha_mask is not None:
-                # Ensure the mask is the correct size
-                if content_alpha_mask.shape[1:3] != final_image.shape[1:3]:
-                    content_alpha_mask = F.interpolate(content_alpha_mask.permute(0, 3, 1, 2), size=(base_H, base_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
-                
-                # Composite the blended result over the background using the content's alpha.
-                # This removes the black borders from `blended_image`.
                 blended_image = final_image * (1.0 - content_alpha_mask) + blended_image * content_alpha_mask
-            # --- END OF THE CORRECTION ---
             
-            final_mask = None # This will now only hold the final user-provided mask.
+            final_mask = None
             if mask is not None:
                 if mask.dim() == 3: mask = mask.unsqueeze(-1)
-                
-                if resize_mode == 'crop':
+                if resize_mode == 'crop' and rotation != 0.0:
                     pil_mask = tensor_to_pil(mask)
                     if pil_mask.mode != 'L': pil_mask = pil_mask.convert('L')
                     
@@ -287,7 +286,6 @@ class LayerSystem:
             if final_mask is not None:
                 if final_mask.dim() == 3:
                     final_mask = final_mask.unsqueeze(-1)
-
                 if props.get("invert_mask", False):
                     final_mask = 1.0 - final_mask
                 
@@ -295,12 +293,80 @@ class LayerSystem:
                     final_mask = F.interpolate(final_mask.permute(0, 3, 1, 2), size=(base_H, base_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1)
 
                 final_mask_with_opacity = final_mask * opacity
-                # `blended_image` is now pre-composited, so it acts as the "top" layer.
                 final_image = final_image * (1.0 - final_mask_with_opacity) + blended_image * final_mask_with_opacity
             else:
-                # No user mask. `blended_image` is already the correct final state of the layer.
-                # We just need to apply the overall opacity.
                 final_image = (1.0 - opacity) * final_image + blended_image * opacity
+
+        text_elements = full_properties.get("texts", [])
+        if text_elements:
+            pil_image = tensor_to_pil(final_image).convert('RGBA')
+
+            image_width = pil_image.width
+            image_height = pil_image.height
+            center_x = image_width // 2
+            center_y = image_height // 2
+
+            text_canvas = Image.new('RGBA', (image_width, image_height), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(text_canvas)
+
+            import sys
+            FONT_MAP = {
+                "Arial": "arial.ttf", "Verdana": "verdana.ttf", "Tahoma": "tahoma.ttf", 
+                "Trebuchet MS": "trebuc.ttf", "Impact": "impact.ttf", "Lucida Sans Unicode": "l_10646.ttf",
+                "Georgia": "georgia.ttf", "Times New Roman": "times.ttf", "Garamond": "gara.ttf",
+                "Courier New": "cour.ttf", "Lucida Console": "lucon.ttf"
+            }
+            font_dirs = []
+            if sys.platform == "win32":
+                font_dirs.append("C:/Windows/Fonts")
+            elif sys.platform == "darwin":
+                font_dirs.extend(["/System/Library/Fonts/Supplemental", "/Library/Fonts"])
+            else: # Linux
+                font_dirs.extend(["/usr/share/fonts/truetype/msttcorefonts", "/usr/share/fonts/truetype/dejavu"])
+            
+            def find_font_path(font_name):
+                font_file = FONT_MAP.get(font_name)
+                if not font_file: return None
+                for d in font_dirs:
+                    path = os.path.join(d, font_file)
+                    if os.path.exists(path): return path
+                return None
+
+            for text_el in text_elements:
+                text_content = text_el.get("text", "")
+                if not text_content: 
+                    continue
+
+                offset_x = text_el.get("offset_x", 0.0)
+                offset_y = text_el.get("offset_y", 0.0)
+                final_size = int(text_el.get("size", 24))
+
+                if final_size <= 0:
+                    continue
+
+                final_x = int(center_x + offset_x)
+                final_y = int(center_y + offset_y)
+
+                color = text_el.get("color", "#FFFFFF")
+                font_family = text_el.get("fontFamily", "Arial")
+                
+                font_path = find_font_path(font_family)
+                font = None
+                try:
+                    if font_path:
+                        font = ImageFont.truetype(font_path, final_size)
+                    else:
+                        print(f"[Layer System] ATTENTION : Police '{font_family}' non trouvée. Utilisation de la police par défaut.")
+                        font = ImageFont.load_default()
+                except Exception as e:
+                    print(f"[Layer System] ERREUR : Impossible de charger la police {font_family}: {e}")
+                    font = ImageFont.load_default()
+                
+                draw.text((final_x, final_y), text_content, font=font, fill=color, anchor="lt")
+
+            pil_image.alpha_composite(text_canvas)
+            
+            final_image = pil_to_tensor(pil_image)
 
         return {
             "result": (final_image,),
@@ -309,5 +375,5 @@ class LayerSystem:
             }
         }
 
-NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem, }
-NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layer System (Dynamic)" }
+NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }
+NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layer System" }
