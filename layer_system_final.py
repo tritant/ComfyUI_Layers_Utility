@@ -177,6 +177,42 @@ class LayerSystem:
             mask_name = layer_name.replace("layer_", "mask_")
             mask = masks.get(mask_name)
             
+            props = layers_properties.get(layer_name, {})
+
+            # ▼▼▼ DÉBUT DE LA MODIFICATION : CHARGEMENT DU MASQUE INTERNE (CORRECTION D'INVERSION) ▼▼▼
+            # S'il n'y a pas de masque externe connecté...
+            if mask is None:
+                # ...on cherche un masque interne dans les propriétés JSON.
+                internal_mask_filename = props.get("internal_mask_filename")
+                if internal_mask_filename:
+                    # On construit le chemin complet du fichier (il est dans le dossier 'input')
+                    image_path = os.path.join(folder_paths.get_input_directory(), internal_mask_filename)
+                    
+                    if os.path.exists(image_path):
+                        try:
+                            print(f"[Layer System] INFO: Chargement du masque interne : {image_path}")
+                            i = Image.open(image_path)
+                            i = ImageOps.exif_transpose(i)
+                            
+                            mask = pil_to_tensor(i) 
+
+                            if mask.shape[-1] > 1:
+                                if mask.shape[-1] == 4:
+                                    mask = mask[..., 3:4]
+                                else:
+                                    mask = mask[..., 0:1]
+                            
+                            # ▼▼▼ LA CORRECTION D'INVERSION EST ICI ▼▼▼
+                            # Le masque est inversé pour correspondre à l'attente du pipeline.
+                            mask = 1.0 - mask 
+                            # ▲▲▲ FIN DE LA CORRECTION D'INVERSION ▲▲▲
+
+                        except Exception as e:
+                            print(f"[Layer System] ERREUR: Impossible de charger le masque interne '{internal_mask_filename}': {e}")
+                    else:
+                        print(f"[Layer System] ATTENTION: Fichier de masque interne non trouvé: {image_path}")
+            # ▲▲▲ FIN DE LA MODIFICATION ▲▲▲
+            
             if mask is not None:
                 mask_for_preview = mask
                 if mask_for_preview.dim() == 3:
@@ -187,8 +223,8 @@ class LayerSystem:
                 mask_pil.save(os.path.join(temp_dir, mask_filename))
                 previews_data[mask_name] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{mask_filename}"
 
-            props = layers_properties.get(layer_name, {})
             if not props.get("enabled", True): continue
+
 
             resize_mode = props.get("resize_mode", "fit")
             scale = props.get("scale", 1.0)
