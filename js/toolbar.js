@@ -1,6 +1,6 @@
-// --- toolbar.js (Corrigé) ---
-
+import { MaskManager } from './mask_manager.js';
 const textIconPath = new Path2D("M5 4v2h5v12h4V6h5V4H5z");
+const maskIconPath = new Path2D("M2 2 H22 V22 H2 Z M12 12 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0");
 const FONT_LIST = [
     // Sans-serif
     "Arial",
@@ -17,11 +17,9 @@ const FONT_LIST = [
     "Courier New",
     "Lucida Console"
 ];
-
 function ensureToolbarStyles() {
     const styleId = 'contextual-toolbar-styles';
     if (document.getElementById(styleId)) return;
-
     const style = document.createElement('style');
     style.id = styleId;
     style.innerHTML = `
@@ -56,7 +54,6 @@ function ensureToolbarStyles() {
     `;
     document.head.appendChild(style);
 }
-
 export class Toolbar {
     constructor(node) {
         this.node = node;
@@ -64,30 +61,32 @@ export class Toolbar {
         this.activeTool = null;
         this.textElements = [];
         this.activeTextarea = null;
-		this.lastClickTime = 0;
+        this.lastClickTime = 0;
         this.lastClickTarget = null;
         this.clickTimeout = null;
         this.tools = [
-            { name: 'text', icon: textIconPath, y: 9 }
+            { name: 'text', icon: textIconPath, y: 9 },
+            { name: 'mask', icon: '🎭', y: 45 } // Positionné en dessous du 'T'
         ];
         this.toolBounds = {};
-		this.selectedTextObject = null;
+        this.selectedTextObject = null;
         this.textEditTool = 'move';
         this.contextualToolbar = null;
-		this.isTextDragging = false;
+        this.isTextDragging = false;
         this.dragStart = { x: 0, y: 0 };
         this.initialTextPos = { x: 0, y: 0 };
-		this.dragOffset = { x: 0, y: 0 };
+        this.dragOffset = { x: 0, y: 0 };
         this.boundDragMove = this.handleDragMove.bind(this);
         this.boundDragEnd = this.handleDragEnd.bind(this);
-		this.isResizing = false;
+        this.isResizing = false;
         this.resizeSensitivity = 0.5;
         this.colorPicker = null;
+        
+        this.maskManager = new MaskManager(this.node);
+        
         this.setupColorPicker();
-		
-		this.createContextualToolbar();
+        this.createContextualToolbar();
     }
-
 createContextualToolbar() {
     ensureToolbarStyles();
     if (this.contextualToolbar) this.contextualToolbar.remove();
@@ -97,7 +96,7 @@ createContextualToolbar() {
     Object.assign(toolbar.style, {
         position: 'fixed', display: 'none', zIndex: '10001',
     });
-	
+    
     const fontSelect = document.createElement("select");
     fontSelect.className = 'font-select';
     Object.assign(fontSelect.style, {
@@ -108,7 +107,6 @@ createContextualToolbar() {
         padding: '3px',
         margin: '0 2px'
     });
-
     FONT_LIST.forEach(fontName => {
         const option = document.createElement("option");
         option.value = fontName;
@@ -116,7 +114,6 @@ createContextualToolbar() {
         option.style.fontFamily = fontName;
         fontSelect.appendChild(option);
     });
-
     fontSelect.addEventListener('change', () => {
         if (this.selectedTextObject) {
             this.selectedTextObject.fontFamily = fontSelect.value;
@@ -125,7 +122,7 @@ createContextualToolbar() {
         }
     });
     toolbar.appendChild(fontSelect);
-	
+    
     const icons = {
         'move': '↔️', 'edit': '✏️', 'resize': '🔍', 'color': '🎨', 'delete': '🗑️', 'close': '❌'
     };
@@ -135,26 +132,26 @@ createContextualToolbar() {
         
         button.addEventListener('click', () => {
             if (!this.selectedTextObject) return;
-			    this.isTextDragging = false;
+                this.isTextDragging = false;
                 this.isResizing = false;
                 this.node.previewCanvas.style.setProperty('cursor', 'default', 'important');
             Array.from(event.currentTarget.parentElement.children).forEach(btn => {
             btn.style.backgroundColor = 'transparent';
             });
             switch(action) {
-				case 'resize':
+                case 'resize':
                    this.isResizing = true;
                    this.node.previewCanvas.style.setProperty('cursor', 'ns-resize', 'important');
                    event.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
                    break;
-				case 'move':
+                case 'move':
                    this.isTextDragging = true;
                    this.node.previewCanvas.style.setProperty('cursor', 'move', 'important');
                    event.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
                    break;
                 case 'edit':
                     this.node.editTextElement(this.selectedTextObject);
-					event.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
+                    event.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
                     break;
                 case 'delete':
                     const index = this.textElements.findIndex(el => el.id === this.selectedTextObject.id);
@@ -167,8 +164,8 @@ createContextualToolbar() {
                 case 'close':
                     this.hideContextualToolbar();
                     break;
-				case 'color':
-				    event.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
+                case 'color':
+                    event.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
                     if (this.selectedTextObject && this.colorPicker) {
                     this.colorPicker.value = this.selectedTextObject.color || '#FFFFFF';
                     this.colorPicker.click();
@@ -180,18 +177,13 @@ createContextualToolbar() {
     }
     document.body.appendChild(toolbar);
 }
-
-
     getTexts() {
         return this.textElements;
     }
-
     draw(ctx) {
         const canvas = this.node.previewCanvas;
         if (!canvas) return;
-
         const x = 0;
-
         ctx.save();
         ctx.fillStyle = '#282828';
         ctx.fillRect(x, 0, this.width, canvas.height);
@@ -199,7 +191,6 @@ createContextualToolbar() {
         ctx.lineWidth = 1;
         ctx.strokeRect(x, 0, this.width, canvas.height);
         ctx.restore();
-
         this.tools.forEach(tool => {
             const iconSize = 24;
             const iconX_start = (this.width - iconSize) / 2;
@@ -210,17 +201,35 @@ createContextualToolbar() {
                 y: iconY_start, 
                 size: iconSize 
             };
-
             ctx.save();
-            ctx.translate(iconX_start, iconY_start);
-            ctx.scale(iconSize / 24, iconSize / 24);
-            ctx.strokeStyle = (this.activeTool === tool.name) ? "#FFD700" : "#FFFFFF";
-            ctx.lineWidth = 2;
-            ctx.stroke(tool.icon);
+            // On vérifie si l'icône est un chemin SVG ou un emoji (texte)
+            if (tool.icon instanceof Path2D) {
+                // Logique pour dessiner le chemin SVG
+                ctx.translate(iconX_start, iconY_start);
+                ctx.scale(iconSize / 24, iconSize / 24);
+                ctx.strokeStyle = (this.activeTool === tool.name) ? "#FFD700" : "#FFFFFF";
+                ctx.lineWidth = 2;
+                ctx.stroke(tool.icon);
+            } else {
+                // Logique pour dessiner l'emoji
+                ctx.font = `${iconSize}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                // On ajoute un effet visuel si l'outil est actif
+                if (this.activeTool === tool.name) {
+                    ctx.fillStyle = "rgba(255, 221, 255, 0.6)"; // Surlignage jaune transparent
+                    const padding = 2;
+                    ctx.fillRect(iconX_start - padding, iconY_start - padding, iconSize + (padding*2), iconSize + (padding*2));
+                }
+                
+                // On dessine l'emoji
+                ctx.fillText(tool.icon, iconX_start + iconSize / 2, iconY_start + iconSize / 2);
+            }
+            
             ctx.restore();
         });
     }
-
     getConversionRatio() {
         if (!this.node.basePreviewImage || !this.node.previewCanvas || (this.node.previewCanvas.width - this.width) <= 0) {
             return 1.0;
@@ -229,28 +238,21 @@ createContextualToolbar() {
         const previewImageAreaWidth = this.node.previewCanvas.width - this.width;
         return baseImageWidth / previewImageAreaWidth;
     }
-
     drawTextElements(ctx) {
         if (!this.node.previewCanvas || !this.node.basePreviewImage) return;
-
         const ratio = this.getConversionRatio();
         if (ratio === 1.0 && this.textElements.length > 0) return;
-
         const inverseRatio = 1 / ratio;
-
         const previewImageAreaWidth = this.node.previewCanvas.width - this.width;
         const previewCenterX = previewImageAreaWidth / 2;
         const previewCenterY = this.node.previewCanvas.height / 2;
-
         ctx.save();
         this.textElements.forEach(textEl => {
             const preview_offset_x = textEl.offset_x * inverseRatio;
             const preview_offset_y = textEl.offset_y * inverseRatio;
             const preview_size = textEl.size * inverseRatio;
-
             const preview_x = this.width + previewCenterX + preview_offset_x;
             const preview_y = previewCenterY + preview_offset_y;
-
             ctx.fillStyle = textEl.color;
             ctx.font = `${preview_size}px ${textEl.fontFamily || 'Arial'}`;
             ctx.textBaseline = 'top';
@@ -258,40 +260,43 @@ createContextualToolbar() {
         });
         ctx.restore();
     }
-
-handleClick(e, mouseX, mouseY) {
-    const clickedTool = this.tools.find(tool => {
-        const clickBox = {
-            x_start: 9,
-            y_start: 9,
-            x_end: 38,
-            y_end: 26
-        };
-
-        return mouseX >= clickBox.x_start && mouseX < clickBox.x_end &&
-               mouseY >= clickBox.y_start && mouseY < clickBox.y_end;
-    });
-
-    if (clickedTool) {
-        this.activeTool = (this.activeTool === clickedTool.name) ? null : clickedTool.name;
-
-        if (this.activeTool === null) {
-            this.hideContextualToolbar();
+    handleClick(e, mouseX, mouseY) {
+        const clickedTool = this.tools.find(tool => {
+            const bounds = this.toolBounds[tool.name];
+            if (!bounds) return false;
+            return mouseX >= bounds.x && mouseX < (bounds.x + bounds.size) &&
+                   mouseY >= bounds.y && mouseY < (bounds.y + bounds.size);
+        });
+        if (clickedTool) {
+            const toolName = clickedTool.name;
+            const isCurrentlyActive = this.activeTool === toolName;
+            // On désactive l'outil actuel et on cache toutes les barres contextuelles
+            this.activeTool = null;
+            this.hideContextualToolbar(); // Cache la barre du texte
+            this.maskManager.hide();     // Cache la barre du masque
+            // Si l'outil n'était pas actif, on l'active
+            if (!isCurrentlyActive) {
+                this.activeTool = toolName;
+            }
+            // On affiche la barre contextuelle correspondante si un outil est actif
+            if (this.activeTool === 'mask') {
+                this.maskManager.show();
+            }
+            // (La barre du texte est gérée par handleCanvasClick, donc pas de 'show' ici)
+            if (this.activeTool && this.node.movingLayer) {
+                this.node.movingLayer = null;
+            }
+            
+            this.node.refreshUI(); // Met à jour l'affichage (couleur de l'icône, etc.)
         }
-
-        if (this.activeTool && this.node.movingLayer) {
-            this.node.movingLayer = null;
+    }
+    handleCanvasClick(e) {
+        if (this.activeTool !== 'text') {
+            return;
         }
         
-        this.node.refreshUI();
- 
-    }
-}
-
-    handleCanvasClick(e) {
         if (this.selectedTextObject) {
             const clickedText = this.node.findTextElementAtPos(e.offsetX, e.offsetY);
-
             if (clickedText && clickedText.id === this.selectedTextObject.id) {
                 this.handleDragStart(e);
             } else {
@@ -309,10 +314,8 @@ handleClick(e, mouseX, mouseY) {
             this.lastClickTime = 0;
             return;
         }
-
         this.lastClickTime = now;
         this.lastClickTarget = clickedTextForSelection ? clickedTextForSelection.id : null;
-
         if (!clickedTextForSelection) {
             this.clickTimeout = setTimeout(() => {
                 if (this.activeTextarea) this.activeTextarea.remove();
@@ -330,7 +333,6 @@ handleClick(e, mouseX, mouseY) {
                 document.body.appendChild(textInput);
                 textInput.focus();
                 document.execCommand('selectAll', false, null);
-
                 const onFinish = () => {
                     if (textInput.innerText.trim() !== "") {
                         const ratio = this.getConversionRatio();
@@ -339,7 +341,6 @@ handleClick(e, mouseX, mouseY) {
                         const previewCenterY = this.node.previewCanvas.height / 2;
                         const click_x_in_preview_area = e.offsetX - this.width;
                         const click_y_in_preview_area = e.offsetY;
-
                         const newTextElement = {
                             id: `text_${Date.now()}`,
                             text: textInput.innerText,
@@ -349,7 +350,6 @@ handleClick(e, mouseX, mouseY) {
                             color: '#FFFFFF',
                             fontFamily: 'Arial',
                         };
-
                         this.textElements.push(newTextElement);
                         this.node.updatePropertiesJSON();
                         this.node.redrawPreviewCanvas();
@@ -369,7 +369,6 @@ handleClick(e, mouseX, mouseY) {
             }, 250);
         }
     }
-
     showContextualToolbar(textElement, event) {
         this.selectedTextObject = textElement;
         this.contextualToolbar.style.display = 'flex';
@@ -383,7 +382,6 @@ handleClick(e, mouseX, mouseY) {
         
         this.updateContextualToolbarPosition();
     }
-
     handleDragStart(e) {
         if (!this.selectedTextObject) return;
         
@@ -393,8 +391,8 @@ handleClick(e, mouseX, mouseY) {
             size: this.selectedTextObject.size
         };
         
-		this.dragStart = { x: e.clientX, y: e.clientY };
-		
+        this.dragStart = { x: e.clientX, y: e.clientY };
+        
         if (this.isResizing) {
             window.addEventListener('mousemove', this.boundDragMove, true);
             window.addEventListener('mouseup', this.boundDragEnd, true);
@@ -405,13 +403,10 @@ handleClick(e, mouseX, mouseY) {
         window.addEventListener('mousemove', this.boundDragMove, true);
         window.addEventListener('mouseup', this.boundDragEnd, true);
     }
-
     updateContextualToolbarPosition() {
         if (!this.selectedTextObject || !this.node.previewCanvas || !this.node.getTextPreviewMetrics) return;
-
         const metrics = this.node.getTextPreviewMetrics(this.selectedTextObject);
         if (!metrics) return;
-
         const canvasRect = this.node.previewCanvas.getBoundingClientRect();
         
         let zoom = 1.0;
@@ -419,10 +414,8 @@ handleClick(e, mouseX, mouseY) {
         if (unscaledWidth > 0 && canvasRect.width > 0) {
             zoom = canvasRect.width / unscaledWidth;
         }
-
         const anchorX = canvasRect.left + (metrics.x + metrics.width / 2) * zoom;
         const anchorY = canvasRect.top + metrics.y * zoom;
-
         const toolbarEl = this.contextualToolbar;
         if (!toolbarEl) return;
         
@@ -432,14 +425,12 @@ handleClick(e, mouseX, mouseY) {
         const margin = 60;
         toolbarEl.style.transform = `translate(-50%, -100%) translateY(-${margin}px)`;
     }
-
     handleDragMove(e) {
         if (!this.selectedTextObject) return;
         
         const dx = e.clientX - this.dragStart.x;
         const dy = e.clientY - this.dragStart.y;
         const ratio = this.getConversionRatio();
-
         if (this.isResizing) {
             const delta_size_final = -(dy * this.resizeSensitivity) * ratio;
             const newSize = this.initialTextData.size + delta_size_final;
@@ -456,39 +447,33 @@ handleClick(e, mouseX, mouseY) {
         
         this.node.redrawPreviewCanvas();
     }
-
 handleDragEnd(e) {
     window.removeEventListener('mousemove', this.boundDragMove, true);
     window.removeEventListener('mouseup', this.boundDragEnd, true);
     
     this.node.updatePropertiesJSON();
     this.node.redrawPreviewCanvas();
-
     if (this.isResizing) {
-
     } 
     else if (this.isTextDragging) { 
         this.isTextDragging = false; 
         this.updateContextualToolbarPosition();
     }
 }
-
 hideContextualToolbar() {
     this.selectedTextObject = null;
     this.contextualToolbar.style.display = 'none';
-	this.isResizing = false;
+    this.isResizing = false;
     this.isTextDragging = false;
-	
+    
     if (this.node.previewCanvas) {
         this.node.previewCanvas.style.setProperty('cursor', 'default', 'important');
     }
     this.node.redrawPreviewCanvas();
 }
-
     setupColorPicker() {
         const picker = document.createElement('input');
         picker.type = 'color';
-
         Object.assign(picker.style, {
             position: 'fixed',
             opacity: 0,
@@ -496,35 +481,28 @@ hideContextualToolbar() {
             left: '-100px',
             top: '-100px'
         });
-
         picker.addEventListener('input', () => {
             if (this.selectedTextObject) {
                 this.selectedTextObject.color = picker.value;
                 this.node.redrawPreviewCanvas();
             }
         });
-
         picker.addEventListener('change', () => {
             if (this.selectedTextObject) {
-				this.setDefaultMode();
+                this.setDefaultMode();
                 this.node.updatePropertiesJSON();
             }
         });
-
         document.body.appendChild(picker);
         this.colorPicker = picker;
     }
-
 setDefaultMode() {
     this.isTextDragging = true;
     this.isResizing = false;
-
     this.node.previewCanvas.style.setProperty('cursor', 'move', 'important');
-
     if (!this.contextualToolbar) return;
     Array.from(this.contextualToolbar.children).forEach(button => {
         button.style.backgroundColor = 'transparent';
-
         if (button.innerHTML === '↔️') {
             button.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
         }
@@ -534,4 +512,4 @@ setDefaultMode() {
         const canvas = this.node.previewCanvas;
         return canvas && mouseX < this.width;
     }
-}
+} 
