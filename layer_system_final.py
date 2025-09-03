@@ -1,3 +1,6 @@
+import server
+from aiohttp import web
+import time
 import torch
 import torch.nn.functional as F
 import json
@@ -9,6 +12,33 @@ import http.server
 import socketserver
 import threading
 import math
+from rembg import remove, new_session
+
+# ▼▼▼ DÉBUT DE LA MODIFICATION ▼▼▼
+
+# 1. Définir le chemin vers notre modèle haute performance
+# On cherche le dossier 'models/rembg' que tu as créé
+# ▼▼▼ NOUVELLE MÉTHODE CORRECTE ▼▼▼
+# On trouve le dossier de base de ComfyUI en remontant depuis le dossier 'input'
+base_path = os.path.dirname(folder_paths.get_input_directory())
+# On construit le chemin vers notre dossier de modèles rembg
+rembg_dir = os.path.join(base_path, "models", "rembg")
+# On définit le chemin complet du modèle
+model_path = os.path.join(rembg_dir, "rmbg-1.4.onnx")
+# ▲▲▲ FIN DE LA CORRECTION ▲▲▲
+
+# 2. Vérifier si le modèle existe
+if not os.path.exists(model_path):
+    print(f"[Layer System] ATTENTION : Modèle rmbg-1.4 non trouvé à l'emplacement : {model_path}")
+    print(f"[Layer System] Le détourage utilisera le modèle par défaut 'u2net'. Pour une meilleure qualité, téléchargez rmbg-1.4.onnx.")
+    # On se rabat sur le modèle par défaut si le fichier n'est pas trouvé
+    session = new_session("u2net")
+else:
+    # On crée la session en utilisant le chemin du fichier .onnx
+    print(f"[Layer System] INFO: Chargement du modèle haute performance rmbg-1.4...")
+    session = new_session(model_path=model_path)
+
+# ▲▲▲ FIN DE LA MODIFICATION ▲▲▲
 
 preview_server_thread = None
 PREVIEW_SERVER_PORT = 8189
@@ -149,7 +179,10 @@ class LayerSystem:
         base_pil = tensor_to_pil(base_image)
         base_filename = "layersys_base.png"
         base_pil.save(os.path.join(temp_dir, base_filename))
-        previews_data["base_image"] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{base_filename}"
+        previews_data["base_image"] = {
+          "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{base_filename}",
+          "filename": base_filename
+        }
 
         if final_image.shape[-1] == 4:
             final_image = final_image[..., :3]
@@ -172,7 +205,10 @@ class LayerSystem:
             layer_pil = tensor_to_pil(layer_image_full)
             layer_filename = f"layersys_{layer_name}.png"
             layer_pil.save(os.path.join(temp_dir, layer_filename))
-            previews_data[layer_name] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{layer_filename}"
+            previews_data[layer_name] = {
+               "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{layer_filename}",
+               "filename": layer_filename # <--- AJOUTE CETTE LIGNE
+            }
 
             mask_name = layer_name.replace("layer_", "mask_")
             mask = masks.get(mask_name)
@@ -221,7 +257,10 @@ class LayerSystem:
                 mask_pil = tensor_to_pil(mask_for_preview_rgb)
                 mask_filename = f"layersys_{mask_name}.png"
                 mask_pil.save(os.path.join(temp_dir, mask_filename))
-                previews_data[mask_name] = f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{mask_filename}"
+                previews_data[mask_name] = {
+                  "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{mask_filename}",
+                  "filename": mask_filename
+                }
 
             if not props.get("enabled", True): continue
 
@@ -410,6 +449,71 @@ class LayerSystem:
                 "layer_previews": [previews_data]
             }
         }
+        
+@server.PromptServer.instance.routes.post("/layersystem/remove_bg")
+async def remove_background_route(request):
+    try:
+        post_data = await request.json()
+        filename = post_data.get("filename")
+
+        if not filename:
+            return web.Response(status=400, text="Nom de fichier manquant")
+
+        # On appelle notre fonction de traitement
+        mask_details = process_remove_bg(filename)
+        
+        return web.json_response(mask_details)
+    except Exception as e:
+        print(f"[Layer System] ERREUR API remove_bg: {e}")
+        return web.Response(status=500, text=str(e))
+
+# C'est la fonction qui fait le vrai travail de détourage
+def process_remove_bg(filename):
+    image_path = os.path.join(folder_paths.get_temp_directory(), filename)
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image source non trouvée dans le dossier temp: {filename}")
+
+    input_image = Image.open(image_path)
+    
+    # On exécute le détourage en utilisant notre session (qui contient maintenant le bon modèle)
+    image_with_alpha = remove(
+        input_image,
+        session=session, # On passe la session que nous avons créée
+        alpha_matting=True,
+        alpha_matting_foreground_threshold=240,
+        alpha_matting_background_threshold=445,
+        alpha_matting_erode_size=25
+    )
+
+    if image_with_alpha.mode != 'RGBA':
+        raise ValueError("rembg n'a pas renvoyé une image RGBA attendue.")
+
+    # La suite de la logique pour créer les deux masques reste inchangée
+    alpha_mask = image_with_alpha.split()[-1]
+
+    # VERSION 1 : Pour la PREVIEW JS (Blanc sur Noir)
+    preview_mask_image = Image.new("RGB", alpha_mask.size, "black")
+    preview_mask_image.paste((255, 255, 255), mask=alpha_mask)
+
+    # VERSION 2 : Pour le RENDU PYTHON (Noir sur Blanc)
+    render_mask_image = ImageOps.invert(preview_mask_image.convert("L")).convert("RGB")
+    
+    timestamp = int(time.time())
+    
+    preview_mask_filename = f"internal_mask_preview_{timestamp}.png"
+    preview_mask_path = os.path.join(folder_paths.get_input_directory(), preview_mask_filename)
+    preview_mask_image.save(preview_mask_path)
+    
+    render_mask_filename = f"internal_mask_render_{timestamp}.png"
+    render_mask_path = os.path.join(folder_paths.get_input_directory(), render_mask_filename)
+    render_mask_image.save(render_mask_path)
+
+    print(f"[Layer System] INFO: Masques HQ (rmbg-1.4) créés : {preview_mask_filename} (preview) et {render_mask_filename} (rendu)")
+
+    return {
+        "preview_mask_details": { "name": preview_mask_filename, "subfolder": "", "type": "input" },
+        "render_mask_details": { "name": render_mask_filename, "subfolder": "", "type": "input" }
+    }
 
 NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }
 NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layer System" }
