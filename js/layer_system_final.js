@@ -62,15 +62,24 @@ app.registerExtension({
             if (message?.layer_previews && message.layer_previews[0]) {
                 const previewData = message.layer_previews[0];
                 this.preview_data = previewData;
-                const imagePromises = Object.entries(previewData).map(([name, url]) => {
+                const imagePromises = Object.entries(previewData).map(([name, previewInfo]) => {
+                // On extrait la propriété .url de l'objet previewInfo
+                const url = previewInfo.url; 
+				
+				//const imagePromises = Object.entries(previewData).map(([name, url]) => {
                     return new Promise((resolve, reject) => {
                         const img = new Image();
                         img.crossOrigin = "anonymous";
-                        img.src = url + `?t=${Date.now()}`;
-                        img.onload = () => resolve({ name, img });
-                        img.onerror = (err) => reject(err);
-                    });
-                });
+                 if (url) {
+                    img.src = url + `?t=${Date.now()}`;
+                    img.onload = () => resolve({ name, img });
+                    img.onerror = (err) => reject(err);
+                } else {
+                    // Si pas d'URL, on considère que c'est une erreur pour ce calque
+                    reject(new Error(`URL de preview manquante pour ${name}`));
+                }
+            });
+        });
                 Promise.all(imagePromises)
                     .then(loadedImages => {
                         this.loaded_preview_images = loadedImages.reduce((acc, {name, img}) => {
@@ -84,6 +93,27 @@ app.registerExtension({
                     .catch(e => console.error("[LayerSystem] Au moins une image d'aperçu n'a pas pu être chargée.", e));
             }
         };
+		
+		
+		const onDrawBackground = nodeType.prototype.onDrawBackground;
+        nodeType.prototype.onDrawBackground = function(ctx) {
+        // On appelle la fonction originale de LiteGraph si elle existe
+        onDrawBackground?.apply(this, arguments);
+
+        // Si la toolbar et ses menus contextuels sont actifs, on met à jour leur position en continu
+        if (this.toolbar) {
+        // Mise à jour de la barre d'outils du MASQUE
+        if (this.toolbar.maskManager?.contextualToolbar?.style.display !== 'none') {
+            this.toolbar.maskManager.positionToolbar();
+        }
+        
+        // Mise à jour de la barre d'outils du TEXTE
+        if (this.toolbar.contextualToolbar?.style.display !== 'none') {
+            this.toolbar.updateContextualToolbarPosition();
+        }
+    }
+};
+		
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);

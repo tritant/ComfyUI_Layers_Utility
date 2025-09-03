@@ -10,6 +10,7 @@ function standardizeMaskFromEditor(editorImage) {
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
         const alpha = data[i + 3];
+        // Opaque -> Blanc (255), Transparent -> Noir (0)
         const value = (alpha > 128) ? 0 : 255;
         data[i] = value;
         data[i + 1] = value;
@@ -20,43 +21,60 @@ function standardizeMaskFromEditor(editorImage) {
     return canvas;
 }
 
-function createEditorImage(layerImage, rawMaskImage) {
+function convertMaskToEditorFormat(cleanMask) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    canvas.width = cleanMask.naturalWidth;
+    canvas.height = cleanMask.naturalHeight;
+    ctx.drawImage(cleanMask, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+        const luminance = data[i];
+        
+        if (luminance < 110) { 
+            data[i] = 0;     // Rouge
+            data[i + 1] = 0; // Vert
+            data[i + 2] = 0; // Bleu
+            data[i + 3] = 0; // Opaque
+        } 
+        else {
+            data[i + 3] = 255;
+        }
+    }
+    ctx.putImageData(imageData, 0, 0);
+    return canvas;
+}
+
+function createEditorImage(layerImage, maskForProcessing) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
     canvas.width = layerImage.naturalWidth;
     canvas.height = layerImage.naturalHeight;
 
-    // Étape 1: Dessiner l'image du masque brut pour l'utiliser comme source alpha.
-    // L'éditeur s'attend à ce que le masque soit DÉJÀ appliqué au canal alpha de l'image.
-    // Et ComfyUI interprète le noir comme transparent et le blanc comme opaque dans son éditeur.
-    // Donc, nous voulons que les zones NOIRES du rawMaskImage deviennent transparentes (alpha = 0)
-    // et les zones BLANCHES deviennent opaques (alpha = 255).
-
-    // On dessine l'image du calque en premier
     ctx.drawImage(layerImage, 0, 0);
-
-    // On change l'opération de composition.
-    // 'destination-in' utilise le masque dessiné ensuite pour définir l'alpha du contenu existant.
-    // Ce masque doit être BLANC sur FOND NOIR pour que le blanc devienne opaque et le noir transparent.
-    // Or, notre rawMaskImage est NOIR sur BLANC. Nous devons donc l'inverser avant de l'utiliser.
     ctx.globalCompositeOperation = 'destination-in';
     
-    // Créer un masque temporaire inversé: blanc sur noir à partir du rawMaskImage (noir sur blanc)
-    const tempMaskCanvas = document.createElement('canvas');
-    const tempMaskCtx = tempMaskCanvas.getContext('2d');
-    tempMaskCanvas.width = rawMaskImage.naturalWidth;
-    tempMaskCanvas.height = rawMaskImage.naturalHeight;
-    tempMaskCtx.filter = 'invert(100%)'; // Inverse les couleurs
-    tempMaskCtx.drawImage(rawMaskImage, 0, 0);
-    tempMaskCtx.filter = 'none'; // Réinitialiser le filtre
+    // Créer un masque temporaire inversé (blanc sur noir)
+    const tempInvertedMask = document.createElement('canvas');
+    const tempCtx = tempInvertedMask.getContext('2d');
 
-    // Dessiner le masque temporaire INVERSÉ par-dessus pour effectuer la découpe
-    // Maintenant, le blanc du masque temporaire rendra l'image visible, et le noir la rendra transparente.
-    ctx.drawImage(tempMaskCanvas, 0, 0, canvas.width, canvas.height);
+    // ▼▼▼ LA CORRECTION EST ICI ▼▼▼
+    // On récupère la largeur et la hauteur, que la source soit une Image ou un Canvas
+    const maskWidth = maskForProcessing.naturalWidth || maskForProcessing.width;
+    const maskHeight = maskForProcessing.naturalHeight || maskForProcessing.height;
+    
+    tempInvertedMask.width = maskWidth;
+    tempInvertedMask.height = maskHeight;
+    // ▲▲▲ FIN DE LA CORRECTION ▲▲▲
 
-    // Réinitialiser l'opération de composition pour ne pas affecter les opérations futures
+    tempCtx.filter = 'invert(1)';
+    tempCtx.drawImage(maskForProcessing, 0, 0);
+
+    // On applique ce masque inversé pour créer le canal alpha
+    ctx.drawImage(tempInvertedMask, 0, 0);
+    
     ctx.globalCompositeOperation = 'source-over';
-
     return canvas;
 }
 
@@ -147,6 +165,7 @@ export class MaskManager {
                 ComfyApp.onClipspaceEditorClosed = original_onClipspaceEditorClosed;
                 setTimeout(() => this.handleMaskEditorClose(this.activeLayer), 0);
             };
+			this.hide(); 
             ComfyApp.open_maskeditor();
         } catch (error) {
             console.error("Erreur lors de la création du masque :", error);
@@ -165,9 +184,19 @@ async handleEditMask() {
 
     try {
         const sourceImage = await this.getSourceImageForActiveLayer();
-        if (!sourceImage) throw new Error("Image source introuvable.");
 
-        // Étape 1: Recharger le masque BRUT (noir/blanc)
+        if (!sourceImage || !sourceImage.complete || sourceImage.naturalWidth === 0) {
+            console.warn("[Layer System] L'image source n'était pas prête. Attente du chargement...");
+            if (sourceImage && sourceImage.src) {
+                await new Promise((resolve, reject) => {
+                    if (sourceImage.complete) { resolve(); } 
+                    else { sourceImage.onload = resolve; sourceImage.onerror = reject; }
+                });
+            } else {
+                throw new Error("Image source trouvée mais invalide.");
+            }
+        }
+        
         const maskDetails = layerProps.internal_mask_details;
         const maskUrl = new URL("/view", window.location.origin);
         maskUrl.searchParams.set("filename", maskDetails.name);
@@ -177,29 +206,10 @@ async handleEditMask() {
         const rawMaskImage = new Image();
         rawMaskImage.crossOrigin = "anonymous";
         rawMaskImage.src = maskUrl.href;
-        await new Promise((r, rj) => { rawMaskImage.onload = r; rawMaskImage.onerror = rj; });
+        const maskLoadingPromise = new Promise((r, rj) => { rawMaskImage.onload = r; rawMaskImage.onerror = rj; });
 
-        // Étape 2: Créer l'image pour l'éditeur en utilisant la nouvelle fonction
-        const editorImageCanvas = createEditorImage(sourceImage, rawMaskImage);
-
-        // Étape 3: Uploader cette image préparée pour obtenir une URL de serveur
-        const blobToUpload = await new Promise(resolve => editorImageCanvas.toBlob(resolve, 'image/png'));
-        const file = new File([blobToUpload], `temp_edit_${this.activeLayer.index}_${+new Date()}.png`, { type: 'image/png' });
-        const uploadResponse = await this._uploadFile(file);
-        
-        const finalUrl = new URL("/view", window.location.origin);
-        finalUrl.searchParams.set("filename", uploadResponse.name);
-        finalUrl.searchParams.set("type", uploadResponse.type);
-        finalUrl.searchParams.set("subfolder", uploadResponse.subfolder);
-
-        const imageToSendToEditor = new Image();
-        imageToSendToEditor.crossOrigin = "anonymous";
-        imageToSendToEditor.src = finalUrl.href;
-        await new Promise(r => { imageToSendToEditor.onload = r; });
-
-        // Étape 4: Ouvrir l'éditeur avec la bonne image
         const tempNode = LiteGraph.createNode("LoadImage");
-        ComfyApp.copyToClipspace({ imgs: [imageToSendToEditor] });
+        ComfyApp.copyToClipspace({ imgs: [sourceImage] });
         ComfyApp.clipspace_return_node = tempNode;
         
         const original_onClipspaceEditorClosed = ComfyApp.onClipspaceEditorClosed;
@@ -208,13 +218,77 @@ async handleEditMask() {
             ComfyApp.onClipspaceEditorClosed = original_onClipspaceEditorClosed;
             setTimeout(() => this.handleMaskEditorClose(this.activeLayer), 0);
         };
+        
+        this.hide();
         ComfyApp.open_maskeditor();
+        
+        await maskLoadingPromise;
+
+        let attempts = 0;
+        const maxAttempts = 50;
+        const checkEditor = () => {
+            attempts++;
+            const editorCanvas = document.getElementById('maskCanvas');
+
+            if (editorCanvas && editorCanvas.width > 0 && editorCanvas.style.display !== 'none') {
+                
+                // ▼▼▼ LA CORRECTION DE TIMING EST ICI ▼▼▼
+                // L'éditeur est visible, mais on attend un court instant pour le laisser finir son propre dessin.
+                setTimeout(() => {
+                    console.log("[Layer System] Éditeur stabilisé. Application du masque.");
+                    
+                    let whiteOnBlackMask;
+                    if (maskDetails.name.includes("_rbg_") || maskDetails.name.includes("_render_")) {
+                        const invertedCanvas = document.createElement('canvas');
+                        const ctx = invertedCanvas.getContext('2d');
+                        invertedCanvas.width = rawMaskImage.naturalWidth;
+                        invertedCanvas.height = rawMaskImage.naturalHeight;
+                        ctx.filter = 'invert(1)';
+                        ctx.drawImage(rawMaskImage, 0, 0);
+                        whiteOnBlackMask = invertedCanvas;
+                    } else {
+                        whiteOnBlackMask = standardizeMaskFromEditor(rawMaskImage);
+                    }
+                    
+                    const finalMaskForEditor = document.createElement('canvas');
+                    const finalCtx = finalMaskForEditor.getContext('2d', { willReadFrequently: true });
+                    finalMaskForEditor.width = whiteOnBlackMask.width;
+                    finalMaskForEditor.height = whiteOnBlackMask.height;
+                    finalCtx.drawImage(whiteOnBlackMask, 0, 0);
+                    
+                    const imageData = finalCtx.getImageData(0, 0, finalMaskForEditor.width, finalMaskForEditor.height);
+                    const data = imageData.data;
+                    for (let i = 0; i < data.length; i += 4) {
+                        const luminance = data[i];
+                        if (luminance > 128) {
+                            data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 255;
+                        } else {
+                            data[i + 3] = 0;
+                        }
+                    }
+                    finalCtx.putImageData(imageData, 0, 0);
+
+                    const editorCtx = editorCanvas.getContext('2d');
+                    if (editorCtx) { // Sécurité supplémentaire
+                        editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+                        editorCtx.drawImage(finalMaskForEditor, 0, 0, editorCanvas.width, editorCanvas.height);
+                    }
+                }, 350); // On attend 250ms, un délai généralement suffisant
+                // ▲▲▲ FIN DE LA CORRECTION ▲▲▲
+
+            } else if (attempts < maxAttempts) {
+                setTimeout(checkEditor, 100);
+            } else {
+                console.error("[LayerSystem] Timeout: L'éditeur de masque ne s'est pas initialisé.");
+            }
+        };
+        setTimeout(checkEditor, 100);
+
     } catch (error) {
         console.error("Erreur lors de la ré-édition du masque :", error);
         alert(`Erreur : ${error.message}`);
     }
 }
-
     async handleMaskEditorClose(activeLayer) {
         if (!activeLayer) activeLayer = this.getActiveLayer();
         if (!activeLayer) return;
@@ -280,60 +354,93 @@ async handleEditMask() {
         this.node.updatePropertiesJSON();
     }
     
-    createContextualToolbar() {
-        if (this.contextualToolbar) this.contextualToolbar.remove();
-        const toolbar = document.createElement("div");
-        toolbar.id = 'mask-contextual-toolbar';
-        Object.assign(toolbar.style, {
-            position: 'fixed', display: 'none', zIndex: '10001',
-            backgroundColor: 'rgba(30, 30, 30, 0.8)', border: '1px solid #555',
-            borderRadius: '8px', padding: '5px', display: 'flex',
-            alignItems: 'center', gap: '10px',
+createContextualToolbar() {
+    if (this.contextualToolbar) this.contextualToolbar.remove();
+    const toolbar = document.createElement("div");
+    toolbar.id = 'mask-contextual-toolbar';
+    Object.assign(toolbar.style, {
+        position: 'fixed', display: 'none', zIndex: '10001',
+        backgroundColor: 'rgba(30, 30, 30, 0.8)', border: '1px solid #555',
+        borderRadius: '8px', padding: '5px', display: 'flex',
+        alignItems: 'center', gap: '10px',
+    });
+
+    const buttonContainer = document.createElement("div");
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.gap = '5px';
+
+    // --- Conteneurs pour les boutons qui apparaissent/disparaissent ---
+    const creationContainer = document.createElement("div");
+    creationContainer.className = 'creation-tools';
+    creationContainer.style.display = 'flex';
+    
+    const editionContainer = document.createElement("div");
+    editionContainer.className = 'edition-tools';
+    editionContainer.style.display = 'flex';
+
+    // --- Création de TOUS les boutons ---
+    const drawMaskButton = document.createElement("button");
+    drawMaskButton.innerText = "Dessiner Masque";
+    drawMaskButton.onclick = () => this.handleCreateMask();
+
+    const reeditMaskButton = document.createElement("button");
+    reeditMaskButton.innerText = "Ré-éditer";
+    reeditMaskButton.onclick = () => this.handleEditMask();
+
+    const deleteMaskButton = document.createElement("button");
+    deleteMaskButton.innerText = "Supprimer";
+    deleteMaskButton.onclick = () => this.handleDeleteMask();
+
+    // ▼▼▼ LE BOUTON REMOVE BG EST CRÉÉ ICI ▼▼▼
+    const removeBgButton = document.createElement("button");
+    removeBgButton.innerText = "Remove BG";
+    removeBgButton.onclick = () => {
+        if (this.node.toolbar.removeBgManager) {
+            this.node.toolbar.removeBgManager.button = removeBgButton;
+            this.node.toolbar.removeBgManager.performRemoveBg();
+        }
+    };
+
+    // --- Assemblage Logique ---
+    // On place les boutons dans leurs conteneurs respectifs
+    creationContainer.append(drawMaskButton);
+    editionContainer.append(reeditMaskButton, deleteMaskButton);
+
+    // On ajoute les conteneurs au container principal
+    buttonContainer.append(creationContainer, editionContainer);
+
+    // ▼▼▼ MODIFICATION CLÉ ▼▼▼
+    // On ajoute le bouton "Remove BG" à part. Il ne sera donc pas affecté
+    // par la logique qui cache/affiche creationContainer et editionContainer.
+    buttonContainer.append(removeBgButton);
+    // ▲▲▲ FIN DE LA MODIFICATION ▲▲▲
+
+    // On applique le style à tous les boutons en une seule fois
+    [drawMaskButton, reeditMaskButton, deleteMaskButton, removeBgButton].forEach(btn => {
+        Object.assign(btn.style, {
+            backgroundColor: '#444', color: 'white', border: '1px solid #666',
+            padding: '8px 12px', margin: '2px', cursor: 'pointer', borderRadius: '4px'
         });
-        const buttonContainer = document.createElement("div");
-        buttonContainer.style.display = 'flex';
-        buttonContainer.style.gap = '5px';
-        const creationContainer = document.createElement("div");
-        creationContainer.className = 'creation-tools';
-        creationContainer.style.display = 'flex';
-        const editionContainer = document.createElement("div");
-        editionContainer.className = 'edition-tools';
-        editionContainer.style.display = 'flex';
-        const drawMaskButton = document.createElement("button");
-        drawMaskButton.innerText = "Dessiner Masque";
-        drawMaskButton.onclick = () => this.handleCreateMask();
-        creationContainer.append(drawMaskButton);
-        const reeditMaskButton = document.createElement("button");
-        reeditMaskButton.innerText = "Ré-éditer";
-        reeditMaskButton.onclick = () => this.handleEditMask();
-        const deleteMaskButton = document.createElement("button");
-        deleteMaskButton.innerText = "Supprimer";
-        deleteMaskButton.onclick = () => this.handleDeleteMask();
-        editionContainer.append(reeditMaskButton, deleteMaskButton);
-        [drawMaskButton, reeditMaskButton, deleteMaskButton].forEach(btn => {
-            Object.assign(btn.style, {
-                backgroundColor: '#444', color: 'white', border: '1px solid #666',
-                padding: '8px 12px', margin: '2px', cursor: 'pointer', borderRadius: '4px'
-            });
-            btn.onmouseover = () => btn.style.backgroundColor = '#555';
-            btn.onmouseout = () => btn.style.backgroundColor = '#444';
-        });
-        buttonContainer.append(creationContainer, editionContainer);
-        const previewContainer = document.createElement("div");
-        Object.assign(previewContainer.style, {
-            width: '64px', height: '64px', border: '1px solid #555',
-            backgroundColor: '#222', flexShrink: '0', padding: '2px'
-        });
-        const previewImage = document.createElement("img");
-        previewImage.id = "ls-mask-preview-image";
-        Object.assign(previewImage.style, {
-            width: '100%', height: '100%', objectFit: 'contain', display: 'none'
-        });
-        previewContainer.append(previewImage);
-        toolbar.append(buttonContainer, previewContainer);
-        document.body.appendChild(toolbar);
-        this.contextualToolbar = toolbar;
-    }
+        btn.onmouseover = () => btn.style.backgroundColor = '#555';
+        btn.onmouseout = () => btn.style.backgroundColor = '#444';
+    });
+    
+    // --- Reste de la fonction (Preview, etc.) ---
+    const previewContainer = document.createElement("div");
+    Object.assign(previewContainer.style, {
+        width: '64px', height: '64px', border: '1px solid #555',
+        backgroundColor: '#222', flexShrink: '0', padding: '2px'
+    });
+    const previewImage = document.createElement("img");
+    previewImage.id = "ls-mask-preview-image";
+    Object.assign(previewImage.style, {
+        width: '100%', height: '100%', objectFit: 'contain', display: 'none'
+    });
+    previewContainer.append(previewImage);
+    toolbar.append(buttonContainer, previewContainer);
+    document.body.appendChild(toolbar);
+    this.contextualToolbar = toolbar;
+}
 
     updatePreview(imageUrl) {
         const previewEl = document.getElementById("ls-mask-preview-image");

@@ -1,4 +1,6 @@
 import { MaskManager } from './mask_manager.js';
+import { RemoveBgManager } from './removebg.js';
+
 const textIconPath = new Path2D("M5 4v2h5v12h4V6h5V4H5z");
 const maskIconPath = new Path2D("M2 2 H22 V22 H2 Z M12 12 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0");
 const FONT_LIST = [
@@ -83,6 +85,7 @@ export class Toolbar {
         this.colorPicker = null;
         
         this.maskManager = new MaskManager(this.node);
+		this.removeBgManager = new RemoveBgManager(this.node, this.maskManager);
         
         this.setupColorPicker();
         this.createContextualToolbar();
