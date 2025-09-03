@@ -144,6 +144,7 @@ app.registerExtension({
             this.rotationOffsetAngle = 0.0;
             
             this.toolbar = new Toolbar(this);
+			this.size[0] = 1000;
             
             setTimeout(() => {
                 const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
@@ -321,6 +322,7 @@ nodeType.prototype.onConfigure = function (info) {
             onConnectionsChange?.apply(this, arguments);
             if (side === 1) { setTimeout(() => this.refreshUI(), 0); }
         };
+		
         nodeType.prototype.redrawPreviewCanvas = function() {
             if (!this.previewCanvas || !this.size || !this.basePreviewImage || !this.basePreviewImage.naturalWidth) {
                 if(this.previewCtx) this.previewCtx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
@@ -1289,21 +1291,48 @@ nodeType.prototype.addLayerWidgets = function(layer_name) {
                 }
             }
         };
-        nodeType.prototype.handleDisconnectedInputs = function() {
-            const connected_layer_names = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
-            const props_to_remove = [];
-            for (const key in this.layer_properties) {
-                if (!connected_layer_names.has(key)) {
-                    props_to_remove.push(key);
-                }
-            }
-            props_to_remove.forEach(key => {
-                delete this.layer_properties[key];
-                if (this.movingLayer === key) this.movingLayer = null;
-                const widgets_to_remove = this.widgets.filter(w => w.name.endsWith(`_${key}`));
-                widgets_to_remove.forEach(w => this.widgets.splice(this.widgets.indexOf(w), 1));
-            });
-        };
+nodeType.prototype.handleDisconnectedInputs = function() {
+    const connected_layer_names = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
+    const inputs_to_remove = [];
+    const props_to_remove = [];
+
+    // On trouve les entrées et propriétés à supprimer
+    for (const key in this.layer_properties) {
+        if (!connected_layer_names.has(key)) {
+            props_to_remove.push(key);
+            const layer_input = this.inputs.find(i => i.name === key);
+            if(layer_input) inputs_to_remove.push(layer_input);
+            const mask_input = this.inputs.find(i => i.name === key.replace("layer_", "mask_"));
+            if(mask_input) inputs_to_remove.push(mask_input);
+        }
+    }
+
+    // On supprime les propriétés
+    props_to_remove.forEach(key => delete this.layer_properties[key]);
+
+    // On supprime les entrées en partant de la fin pour ne pas perturber les index
+    inputs_to_remove.sort((a,b) => this.inputs.indexOf(b) - this.inputs.indexOf(a)).forEach(i => this.removeInput(this.inputs.indexOf(i)));
+    
+    // On ré-indexe les entrées et les propriétés restantes
+    const new_props = {};
+    const remaining_layers = this.inputs.filter(i => i.name.startsWith("layer_"));
+    const remaining_masks = this.inputs.filter(i => i.name.startsWith("mask_"));
+    
+    remaining_layers.sort((a,b)=> parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).forEach((input, i) => {
+        const old_name = input.name;
+        const new_name = `layer_${i + 1}`;
+        if(this.layer_properties[old_name]) {
+            new_props[new_name] = this.layer_properties[old_name];
+        }
+        const old_mask_name = old_name.replace("layer_", "mask_");
+        const mask_input = remaining_masks.find(m => m.name === old_mask_name);
+        if(mask_input) {
+            mask_input.name = new_name.replace("layer_", "mask_");
+        }
+        input.name = new_name;
+    });
+    this.layer_properties = new_props;
+};
         
         nodeType.prototype.ensureWildcardInputs = function () {
             const layerInputs = this.inputs.filter(i => i.name.startsWith("layer_"));
