@@ -1329,24 +1329,68 @@ nodeType.prototype.handleDisconnectedInputs = function() {
     inputs_to_remove.sort((a,b) => this.inputs.indexOf(b) - this.inputs.indexOf(a)).forEach(i => this.removeInput(this.inputs.indexOf(i)));
     
     // On ré-indexe les entrées et les propriétés restantes
-    const new_props = {};
-    const remaining_layers = this.inputs.filter(i => i.name.startsWith("layer_"));
-    const remaining_masks = this.inputs.filter(i => i.name.startsWith("mask_"));
+    const final_props = {};
+    const final_images = {};
+    const final_data = {};
+
+    // On s'assure de conserver les images/données qui ne sont pas des calques (ex: base_image)
+    for (const key in this.loaded_preview_images) {
+        if (!key.startsWith("layer_") && !key.startsWith("mask_")) {
+            final_images[key] = this.loaded_preview_images[key];
+        }
+    }
+    if (this.preview_data) {
+        for (const key in this.preview_data) {
+            if (!key.startsWith("layer_") && !key.startsWith("mask_")) {
+                final_data[key] = this.preview_data[key];
+            }
+        }
+    }
     
-    remaining_layers.sort((a,b)=> parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).forEach((input, i) => {
+    // On prend la liste des calques restants, triée par leur position visuelle
+    const remaining_layers = this.inputs.filter(i => i.name.startsWith("layer_"));
+    remaining_layers.sort((a, b) => this.inputs.indexOf(a) - this.inputs.indexOf(b));
+
+    // On parcourt les calques restants pour tout ré-indexer proprement
+    remaining_layers.forEach((input, i) => {
         const old_name = input.name;
         const new_name = `layer_${i + 1}`;
-        if(this.layer_properties[old_name]) {
-            new_props[new_name] = this.layer_properties[old_name];
-        }
         const old_mask_name = old_name.replace("layer_", "mask_");
-        const mask_input = remaining_masks.find(m => m.name === old_mask_name);
-        if(mask_input) {
-            mask_input.name = new_name.replace("layer_", "mask_");
+        const new_mask_name = new_name.replace("layer_", "mask_");
+
+        // 1. On déplace les PROPRIÉTÉS
+        if (this.layer_properties[old_name]) {
+            final_props[new_name] = this.layer_properties[old_name];
         }
+        
+        // 2. On déplace les IMAGES PRÉCHARGÉES (calque ET masque)
+        if (this.loaded_preview_images[old_name]) {
+            final_images[new_name] = this.loaded_preview_images[old_name];
+        }
+        if (this.loaded_preview_images[old_mask_name]) {
+            final_images[new_mask_name] = this.loaded_preview_images[old_mask_name];
+        }
+
+        // 3. On déplace les DONNÉES DE PREVIEW (calque ET masque)
+        if (this.preview_data && this.preview_data[old_name]) {
+            final_data[new_name] = this.preview_data[old_name];
+        }
+        if (this.preview_data && this.preview_data[old_mask_name]) {
+            final_data[new_mask_name] = this.preview_data[old_mask_name];
+        }
+
+        // 4. On renomme les entrées (inputs) du graphe
         input.name = new_name;
+        const mask_input = this.inputs.find(m => m.name === old_mask_name);
+        if (mask_input) {
+            mask_input.name = new_mask_name;
+        }
     });
-    this.layer_properties = new_props;
+
+    // 5. On assigne les objets fraîchement reconstruits et synchronisés
+    this.layer_properties = final_props;
+    this.loaded_preview_images = final_images;
+    this.preview_data = final_data;
 };
         
         nodeType.prototype.ensureWildcardInputs = function () {
