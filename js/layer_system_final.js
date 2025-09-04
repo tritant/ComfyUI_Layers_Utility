@@ -144,7 +144,7 @@ app.registerExtension({
             this.rotationOffsetAngle = 0.0;
             
             this.toolbar = new Toolbar(this);
-			this.size[0] = 1000;
+			this.size[0] = 800;
             
             setTimeout(() => {
                 const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");

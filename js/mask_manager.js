@@ -203,6 +203,9 @@ async handleEditMask() {
         maskUrl.searchParams.set("type", maskDetails.type);
         maskUrl.searchParams.set("subfolder", maskDetails.subfolder);
         
+		const lastUpdate = layerProps.mask_last_update || Date.now();
+        maskUrl.searchParams.set("t", lastUpdate);
+		
         const rawMaskImage = new Image();
         rawMaskImage.crossOrigin = "anonymous";
         rawMaskImage.src = maskUrl.href;
@@ -306,12 +309,13 @@ async handleEditMask() {
             rawCanvas.height = returned_image.naturalHeight;
             rawCanvas.getContext('2d').drawImage(returned_image, 0, 0);
             const blobToUpload = await new Promise(resolve => rawCanvas.toBlob(resolve, 'image/png'));
-            const file = new File([blobToUpload], `internal_mask_${activeLayer.index}_${+new Date()}.png`, { type: "image/png" });
+            const file = new File([blobToUpload], `internal_mask_${activeLayer.index}.png`, { type: "image/png" });
             const finalMaskResponse = await this._uploadFile(file, true);
             
             const layerProps = this.node.layer_properties[activeLayer.name];
             layerProps.internal_mask_filename = finalMaskResponse.name;
             layerProps.internal_mask_details = finalMaskResponse;
+			layerProps.mask_last_update = Date.now();
             this.node.updatePropertiesJSON();
             
             const standardizedCanvas = standardizeMaskFromEditor(returned_image);
@@ -461,6 +465,10 @@ createContextualToolbar() {
             url.searchParams.append("filename", details.name);
             url.searchParams.append("type", details.type);
             url.searchParams.append("subfolder", details.subfolder);
+			
+			const lastUpdate = layerProps.mask_last_update || Date.now();
+            url.searchParams.append("t", lastUpdate);
+			
             this.updatePreview(url.href);
         } else {
             this.updatePreview(null);

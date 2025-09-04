@@ -8,7 +8,7 @@ export class RemoveBgManager {
 async performRemoveBg() {
     const activeLayer = this.maskManager.getActiveLayer();
     if (!activeLayer) return;
-
+    const layerIndex = activeLayer.index;
     const layerName = activeLayer.name;
     const previewInfo = this.node.preview_data?.[layerName];
     const sourceFilename = previewInfo?.filename;
@@ -27,7 +27,7 @@ async performRemoveBg() {
         const response = await fetch("/layersystem/remove_bg", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ filename: sourceFilename }),
+            body: JSON.stringify({ filename: sourceFilename, layer_index_str: String(layerIndex)}),
         });
 
         if (!response.ok) throw new Error(`Erreur du serveur : ${await response.text()}`);
