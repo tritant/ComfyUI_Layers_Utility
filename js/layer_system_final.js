@@ -1150,7 +1150,20 @@ nodeType.prototype.getHandleAtPos = function(e) {
             this.handleDisconnectedInputs();
             this.updateLayerWidgets();
             this.ensureWildcardInputs();
+  
+            // ▼▼▼ AJOUTE CE BLOC DE CODE ICI ▼▼▼
+            const connectedLayers = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null);
             
+            // S'il n'y a qu'un seul calque connecté (donc, le premier)
+            if (connectedLayers.length === 1) {
+                const layerName = connectedLayers[0].name;
+                // On s'assure que ses propriétés existent, puis on le force à être déplié.
+                if (this.layer_properties[layerName]) {
+                    this.layer_properties[layerName].layer_collapsed = false;
+                }
+            }
+            // ▲▲▲ FIN DE L'AJOUT ▲▲▲
+  
             const activeLayers = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
             for (let i = 1; i <= MAX_LAYERS; i++) {
                 const layerName = `layer_${i}`;
@@ -1178,8 +1191,11 @@ nodeType.prototype.getHandleAtPos = function(e) {
             this.toolbar.maskManager.hide();
         }
     }
-            this.updatePropertiesJSON();
+            
+			this.updatePropertiesJSON();
             resizeHeight.call(this);
+			
+
         };
         
         nodeType.prototype.moveLayer = function(layer_index, direction) {
@@ -1391,6 +1407,20 @@ nodeType.prototype.handleDisconnectedInputs = function() {
     this.layer_properties = final_props;
     this.loaded_preview_images = final_images;
     this.preview_data = final_data;
+	
+	    // ▼▼▼ LA LOGIQUE UX EST MAINTENANT ICI, À SA BONNE PLACE ▼▼▼
+    const finalLayerNames = Object.keys(this.layer_properties);
+    if (finalLayerNames.length > 0) {
+        const isAnyLayerExpanded = finalLayerNames.some(name =>
+            !this.layer_properties[name].layer_collapsed
+        );
+
+        if (!isAnyLayerExpanded) {
+            // On déplie le premier calque de la nouvelle liste
+            this.layer_properties[finalLayerNames[0]].layer_collapsed = false;
+        }
+    }
+    // --- FIN DE LA LOGIQUE UX ---
 };
         
         nodeType.prototype.ensureWildcardInputs = function () {
