@@ -1207,6 +1207,21 @@ nodeType.prototype.getHandleAtPos = function(e) {
             const mask_img_A = this.loaded_preview_images[mask_name_A];
             this.loaded_preview_images[mask_name_A] = this.loaded_preview_images[mask_name_B]; this.loaded_preview_images[mask_name_B] = mask_img_A;
             
+            // ▼▼▼ LA CORRECTION COMPLÈTE EST ICI ▼▼▼
+            // On s'assure que this.preview_data existe avant de le manipuler.
+            if (this.preview_data) {
+                // Échange des données du CALQUE
+                const layer_data_A = this.preview_data[name_A];
+                this.preview_data[name_A] = this.preview_data[name_B];
+                this.preview_data[name_B] = layer_data_A;
+                
+                // Échange des données du MASQUE associé
+                const mask_data_A = this.preview_data[mask_name_A];
+                this.preview_data[mask_name_A] = this.preview_data[mask_name_B];
+                this.preview_data[mask_name_B] = mask_data_A;
+            }
+            // ▲▲▲ FIN DE LA CORRECTION ▲▲▲
+			
             if (input_A.link !== null) this.graph.links[input_A.link].target_slot = this.inputs.indexOf(input_A);
             if (input_B.link !== null) this.graph.links[input_B.link].target_slot = this.inputs.indexOf(input_B);
             if (mask_input_A && mask_input_A.link !== null) this.graph.links[mask_input_A.link].target_slot = this.inputs.indexOf(mask_input_A);

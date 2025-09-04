@@ -42,7 +42,8 @@ async performRemoveBg() {
         const layerProps = this.node.layer_properties[layerName];
         layerProps.internal_mask_filename = renderMaskDetails.name;
         layerProps.internal_mask_details = renderMaskDetails;
-        
+        layerProps.internal_preview_mask_details = previewMaskDetails;
+		layerProps.mask_last_update = Date.now();
         // On ne touche PAS au toggle, il reste à sa valeur manuelle.
         this.node.updatePropertiesJSON();
 
@@ -52,6 +53,8 @@ async performRemoveBg() {
         previewMaskUrl.searchParams.set("type", previewMaskDetails.type);
         previewMaskUrl.searchParams.set("subfolder", previewMaskDetails.subfolder);
         
+		previewMaskUrl.searchParams.set("t", layerProps.mask_last_update);
+		
         const newMaskImage = new Image();
         newMaskImage.crossOrigin = "anonymous";
         newMaskImage.src = previewMaskUrl.href;
