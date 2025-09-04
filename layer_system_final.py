@@ -455,12 +455,12 @@ async def remove_background_route(request):
     try:
         post_data = await request.json()
         filename = post_data.get("filename")
-
+        layer_index_str = post_data.get("layer_index_str")
         if not filename:
             return web.Response(status=400, text="Nom de fichier manquant")
 
         # On appelle notre fonction de traitement
-        mask_details = process_remove_bg(filename)
+        mask_details = process_remove_bg(filename, layer_index_str)
         
         return web.json_response(mask_details)
     except Exception as e:
@@ -468,7 +468,7 @@ async def remove_background_route(request):
         return web.Response(status=500, text=str(e))
 
 # C'est la fonction qui fait le vrai travail de détourage
-def process_remove_bg(filename):
+def process_remove_bg(filename, layer_index_str):
     image_path = os.path.join(folder_paths.get_temp_directory(), filename)
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image source non trouvée dans le dossier temp: {filename}")
@@ -500,11 +500,11 @@ def process_remove_bg(filename):
     
     timestamp = int(time.time())
     
-    preview_mask_filename = f"internal_mask_preview_{timestamp}.png"
+    preview_mask_filename = f"internal_mask_preview_{layer_index_str}.png"
     preview_mask_path = os.path.join(folder_paths.get_input_directory(), preview_mask_filename)
     preview_mask_image.save(preview_mask_path)
     
-    render_mask_filename = f"internal_mask_render_{timestamp}.png"
+    render_mask_filename = f"internal_mask_render_{layer_index_str}.png"
     render_mask_path = os.path.join(folder_paths.get_input_directory(), render_mask_filename)
     render_mask_image.save(render_mask_path)
 
