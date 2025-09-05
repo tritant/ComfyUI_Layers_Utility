@@ -18,7 +18,6 @@ function applyMask(layerImage, maskImage) {
     ctx.putImageData(layerData, 0, 0);
     return canvas;
 }
-
 const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "soft-light", "hard-light", "difference", "color-dodge", "color-burn"];
 const RESIZE_MODES = ["stretch", "fit", "cover", "crop"];
 const MAX_LAYERS = 10;
@@ -32,7 +31,6 @@ const unlockIconPath = new Path2D("M9 7V6a3 3 0 116 0v1h2V6a5 5 0 00-10 0v1H5v12
 const arrowUpPath = new Path2D("M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z");
 const arrowDownPath = new Path2D("M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z");
 const moveIconPath = new Path2D("M12 2 L12 22 M2 12 L22 12 M12 2 L8 6 M12 2 L16 6 M12 22 L8 18 M12 22 L16 18 M2 12 L6 8 M2 12 L6 16 M22 12 L18 8 M22 12 L18 16");
-
 app.registerExtension({
     name: "LayerSystem.DynamicLayers",
     
@@ -40,7 +38,6 @@ app.registerExtension({
         if (nodeData.name !== "LayerSystem") {
             return;
         }
-
         const resizeHeight = function() {
             if (!this.size) return;
             const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
@@ -60,22 +57,26 @@ app.registerExtension({
                 delete anchorWidget.computeSize;
             }
         };
-
         const onExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function(message) {
             onExecuted?.apply(this, arguments);
             if (message?.layer_previews && message.layer_previews[0]) {
                 const previewData = message.layer_previews[0];
                 this.preview_data = previewData;
-                const imagePromises = Object.entries(previewData).map(([name, url]) => {
+                const imagePromises = Object.entries(previewData).map(([name, previewInfo]) => {
+                const url = previewInfo.url; 
                     return new Promise((resolve, reject) => {
                         const img = new Image();
                         img.crossOrigin = "anonymous";
-                        img.src = url + `?t=${Date.now()}`;
-                        img.onload = () => resolve({ name, img });
-                        img.onerror = (err) => reject(err);
-                    });
-                });
+                 if (url) {
+                    img.src = url + `?t=${Date.now()}`;
+                    img.onload = () => resolve({ name, img });
+                    img.onerror = (err) => reject(err);
+                } else {
+                    reject(new Error(`[Layer System] Missing preview URL for ${name}`));
+                }
+            });
+        });
                 Promise.all(imagePromises)
                     .then(loadedImages => {
                         this.loaded_preview_images = loadedImages.reduce((acc, {name, img}) => {
@@ -86,10 +87,22 @@ app.registerExtension({
                         resizeHeight.call(this);
                         this.redrawPreviewCanvas();
                     })
-                    .catch(e => console.error("[LayerSystem] Au moins une image d'aperçu n'a pas pu être chargée.", e));
+                    .catch(e => console.error("[Layer System] At least one preview image could not be loaded.", e));
             }
         };
-
+		
+		const onDrawBackground = nodeType.prototype.onDrawBackground;
+        nodeType.prototype.onDrawBackground = function(ctx) {
+        onDrawBackground?.apply(this, arguments);
+        if (this.toolbar) {
+        if (this.toolbar.maskManager?.contextualToolbar?.style.display !== 'none') {
+            this.toolbar.maskManager.positionToolbar();
+        }
+        if (this.toolbar.contextualToolbar?.style.display !== 'none') {
+            this.toolbar.updateContextualToolbarPosition();
+        }
+    }
+};
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
@@ -113,13 +126,14 @@ app.registerExtension({
             this.textActionMode = "none";
             this.activeTextObject = null;
             this.initialTextPos = { x: 0, y: 0 };
-			this.isTextDragging = false;
-			this.dragOffset = { x: 0, y: 0 };
-			this.needsFirstSync = true;
-			this._resizing = false;
-			this.rotationOffsetAngle = 0.0;
-			
+            this.isTextDragging = false;
+            this.dragOffset = { x: 0, y: 0 };
+            this.needsFirstSync = true;
+            this._resizing = false;
+            this.rotationOffsetAngle = 0.0;
+            
             this.toolbar = new Toolbar(this);
+			this.size[0] = 800;
             
             setTimeout(() => {
                 const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
@@ -141,7 +155,6 @@ app.registerExtension({
 this.previewCanvas.addEventListener('mousedown', (e) => {
     const mouseX = e.offsetX;
     const mouseY = e.offsetY;
-
     if (this.textActionMode === 'moving' && this.activeTextObject) {
         const targetText = this.findTextElementAtPos(mouseX, mouseY);
         if (targetText && targetText.id === this.activeTextObject.id) {
@@ -155,7 +168,6 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         return;
     }
-
     if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
         this.toolbar.handleClick(e, mouseX, mouseY);
         return;
@@ -165,7 +177,6 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
         this.toolbar.handleCanvasClick(e);
         return;
     }
-
     if (!this.movingLayer) return;
     const props = this.layer_properties[this.movingLayer];
     if (!props) return;
@@ -196,7 +207,6 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
                     this.previewCanvas.addEventListener('mouseup', this.onCanvasMouseUp.bind(this));
                     this.previewCanvas.addEventListener('mouseleave', this.onCanvasMouseLeave.bind(this));
                 }
-
                 this.initializeHeaderCanvases();
                 
                 const p_widget = this.widgets.find(w => w.name === "_properties_json");
@@ -204,45 +214,32 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
                     p_widget.hidden = true;
                     p_widget.computeSize = () => [0, -4];
                 }
-
                 this.refreshUI();
             }, 0);
         };
         
 nodeType.prototype.onResize = function(size) {
-    // Utilise le flag pour éviter les boucles infinies
     if (this._resizing) return;
     this._resizing = true;
-
-    // On s'assure que tout est prêt pour le calcul
     if (!this.widgets || !this.size || !this.basePreviewImage || this.basePreviewImage.naturalWidth <= 0) {
         this._resizing = false;
         return;
     }
     
-    // --- Logique de recalcul de la hauteur ---
     const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
     if (anchorWidget) {
         const aspectRatio = this.basePreviewImage.naturalHeight / this.basePreviewImage.naturalWidth;
         const toolbarWidth = this.toolbar ? this.toolbar.width : 0;
         const contentWidth = size[0] - 20 - toolbarWidth;
         const requiredHeight = contentWidth * aspectRatio;
-        
-        // On force temporairement la hauteur du widget de l'aperçu
         anchorWidget.computeSize = () => [size[0], requiredHeight];
     }
     
-    // On force le nœud à recalculer sa hauteur totale
     const newComputedSize = this.computeSize();
     this.size[1] = newComputedSize[1];
-
-    // On nettoie notre modification temporaire
-    if (anchorWidget?.computeSize) {
+     if (anchorWidget?.computeSize) {
         delete anchorWidget.computeSize;
     }
-    // --- Fin de la logique de recalcul ---
-
-    // On planifie le redessinage du contenu du canevas
     if (this.previewCanvas) {
         if (this.redraw_req) cancelAnimationFrame(this.redraw_req);
         this.redraw_req = requestAnimationFrame(() => {
@@ -251,7 +248,6 @@ nodeType.prototype.onResize = function(size) {
         });
     }
 
-    // On redessine les en-têtes des calques
     for (let i = 1; i <= 10; i++) { // Remplacer 10 par MAX_LAYERS serait mieux
         const headerAnchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
         if (headerAnchor && headerAnchor.canvas) {
@@ -259,49 +255,33 @@ nodeType.prototype.onResize = function(size) {
         }
     }
     
-    // On baisse le drapeau pour la prochaine action
     this._resizing = false;
 };
-
 nodeType.prototype.onConfigure = function (info) {
-    // On appelle la fonction originale de LiteGraph si elle existe
     const onConfigureOriginal = nodeType.prototype.__proto__.onConfigure;
     onConfigureOriginal?.apply(this, arguments);
-
     if (info.widgets_values) {
-        // --- NOUVELLE LOGIQUE DE CHARGEMENT ROBUSTE ---
         let mainDataString = null;
         
-        // On parcourt toutes les valeurs sauvegardées...
         for (const val of info.widgets_values) {
-            // ... et on cherche la première qui est une chaîne de caractères et qui commence par '{"layers":'
             if (typeof val === 'string' && val.startsWith('{"layers":')) {
                 mainDataString = val;
-                break; // On a trouvé nos données, on arrête de chercher.
+                break;
             }
         }
-
-        // Si on a trouvé notre bloc de données, on le charge.
         if (mainDataString) {
             try {
                 const props = JSON.parse(mainDataString);
                 this.layer_properties = props.layers || {};
-                
-                // On s'assure que la toolbar existe avant de lui assigner les textes
                 if (this.toolbar) {
                     this.toolbar.textElements = props.texts || [];
                 } else {
-                    // Si la toolbar n'est pas prête, on met les données en attente (sécurité)
                     this.loadedTextData = props.texts || [];
                 }
-                
-                console.log("[LayerSystem] Données chargées avec succès depuis le bloc principal.");
-
-            } catch(e) { console.error("[LayerSystem] Erreur lors de l'analyse du JSON principal dans onConfigure", e); }
+                console.log("[Layer System] Data successfully loaded from main block.");
+            } catch(e) { console.error("[LayerSystem] Error parsing main JSON in onConfigure", e); }
         }
     }
-    
-    // On active les sauvegardes uniquement à la toute fin.
     this.isConfigured = true;
 };
         
@@ -310,7 +290,7 @@ nodeType.prototype.onConfigure = function (info) {
             onConnectionsChange?.apply(this, arguments);
             if (side === 1) { setTimeout(() => this.refreshUI(), 0); }
         };
-
+		
         nodeType.prototype.redrawPreviewCanvas = function() {
             if (!this.previewCanvas || !this.size || !this.basePreviewImage || !this.basePreviewImage.naturalWidth) {
                 if(this.previewCtx) this.previewCtx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
@@ -320,13 +300,11 @@ nodeType.prototype.onConfigure = function (info) {
             const canvas = this.previewCanvas;
             const ctx = this.previewCtx;
             const baseImg = this.basePreviewImage;
-
             const availableWidth = this.size[0] - 20; 
             const toolbarWidth = this.toolbar.width;
             const imageAreaWidth = availableWidth - toolbarWidth;
             const aspectRatio = baseImg.naturalHeight / baseImg.naturalWidth;
             const requiredHeight = imageAreaWidth * aspectRatio;
-
             if (canvas.width !== availableWidth) {
                 canvas.width = availableWidth;
             }
@@ -341,7 +319,6 @@ nodeType.prototype.onConfigure = function (info) {
             const destY = 0;
             const destWidth = imageAreaWidth;
             const destHeight = finalHeight;
-
             ctx.drawImage(baseImg, destX, destY, destWidth, destHeight);
             this.previewCanvasScale = destWidth / baseImg.naturalWidth;
             
@@ -352,11 +329,9 @@ nodeType.prototype.onConfigure = function (info) {
                 const layerImage = this.loaded_preview_images[layerName];
                 const maskName = layerName.replace("layer_", "mask_");
                 const maskImage = this.loaded_preview_images[maskName];
-
                 if (!props || !props.enabled || !layerImage || !layerImage.naturalWidth || !layerImage.naturalHeight) {
                     continue;
                 }
-
                 ctx.save();
                 let imageToDraw = layerImage;
                 if (props.brightness !== 0.0 || props.contrast !== 0.0 || props.saturation !== 1.0 || props.color_r !== 1.0 || props.color_g !== 1.0 || props.color_b !== 1.0) {
@@ -383,7 +358,6 @@ nodeType.prototype.onConfigure = function (info) {
                         imageToDraw = layerImage;
                     }
                 }
-
                 let finalImageToDraw = imageToDraw;
                 if (maskImage && maskImage.naturalWidth > 0) {
                     let maskToApply = maskImage;
@@ -398,7 +372,6 @@ nodeType.prototype.onConfigure = function (info) {
                     }
                     finalImageToDraw = applyMask(imageToDraw, maskToApply);
                 }
-
                 let final_sx = 0, final_sy = 0, final_sw = finalImageToDraw.width, final_sh = finalImageToDraw.height;
                 let final_dx = destX, final_dy = destY, final_dw = destWidth, final_dh = destHeight;
                 
@@ -430,7 +403,6 @@ nodeType.prototype.onConfigure = function (info) {
                 
                 ctx.globalAlpha = props.opacity;
                 ctx.globalCompositeOperation = props.blend_mode === 'normal' ? 'source-over' : props.blend_mode;
-
                 if (props.resize_mode === 'crop') {
                     const centerX = final_dx + final_dw / 2;
                     const centerY = final_dy + final_dh / 2;
@@ -439,9 +411,7 @@ nodeType.prototype.onConfigure = function (info) {
                     ctx.translate(centerX, centerY);
                     const angleInRadians = (props.rotation || 0) * Math.PI / 180;
                     ctx.rotate(angleInRadians);
-
                     ctx.drawImage(finalImageToDraw, final_sx, final_sy, final_sw, final_sh, -final_dw / 2, -final_dh / 2, final_dw, final_dh);
-
                     if (this.movingLayer === layerName) {
                         ctx.strokeStyle = "red"; 
                         ctx.lineWidth = 2; 
@@ -471,7 +441,6 @@ nodeType.prototype.onConfigure = function (info) {
                         ctx.strokeStyle = "red";
                         ctx.lineWidth = 2;
                         ctx.stroke();
-
                         ctx.beginPath();
                         ctx.arc(0, rotHandleY, handleSize / 2, 0, 2 * Math.PI);
                         ctx.fillStyle = "white";
@@ -492,7 +461,6 @@ nodeType.prototype.onConfigure = function (info) {
          if (this.toolbar && this.toolbar.selectedTextObject) {
             const el = this.toolbar.selectedTextObject;
             const metrics = this.getTextPreviewMetrics(el);
-
             if (metrics) {
                 ctx.save();
                 ctx.strokeStyle = '#FFD700';
@@ -510,43 +478,31 @@ nodeType.prototype.onConfigure = function (info) {
                 ctx.restore();
             }
         }
-			
+            
             this.toolbar.drawTextElements(ctx);
             this.toolbar.draw(ctx);
-			//if (this.needsFirstSync) {
-              //this.refreshUI();
-              //this.needsFirstSync = false;
-            //}
         };
-		
+        
 nodeType.prototype.getTextPreviewMetrics = function(textEl) {
     if (!this.basePreviewImage || !this.previewCanvas || !this.toolbar) { return null; }
-
     const baseImageWidth = this.basePreviewImage.naturalWidth;
     const previewAreaWidth = this.previewCanvas.width - this.toolbar.width;
     if (baseImageWidth <= 0) return null;
-
     const inverseRatio = previewAreaWidth / baseImageWidth;
-
     const previewCenterX = previewAreaWidth / 2;
     const previewCenterY = this.previewCanvas.height / 2;
-
     const preview_size = textEl.size * inverseRatio;
     const preview_offset_x = textEl.offset_x * inverseRatio;
     const preview_offset_y = textEl.offset_y * inverseRatio;
-
     const preview_x = this.toolbar.width + previewCenterX + preview_offset_x;
     const preview_y = previewCenterY + preview_offset_y;
-
     const ctx = this.previewCtx;
     ctx.save();
     ctx.font = `${preview_size}px ${textEl.fontFamily || 'Arial'}`;
     const metrics = ctx.measureText(textEl.text);
     ctx.restore();
-
     const textHeight = (metrics.fontBoundingBoxAscent || 0) + (metrics.fontBoundingBoxDescent || 0);
     const finalHeight = textHeight > 0 ? textHeight : preview_size;
-
     return {
         x: preview_x,
         y: preview_y,
@@ -555,22 +511,18 @@ nodeType.prototype.getTextPreviewMetrics = function(textEl) {
         height: finalHeight -10
     };
 };
-
 nodeType.prototype.findTextElementAtPos = function(mouseX, mouseY) {
     if (!this.toolbar || !this.toolbar.textElements.length || !this.previewCanvas || !this.basePreviewImage) {
         return null;
     }
-
     const ctx = this.previewCtx;
     const baseImageWidth = this.basePreviewImage.naturalWidth;
     const previewAreaWidth = this.previewCanvas.width - this.toolbar.width;
     
     if (baseImageWidth <= 0) return null;
-
     const inverseRatio = previewAreaWidth / baseImageWidth;
     const previewCenterX = previewAreaWidth / 2;
     const previewCenterY = this.previewCanvas.height / 2;
-
     ctx.save();
     
     for (let i = this.toolbar.textElements.length - 1; i >= 0; i--) {
@@ -585,7 +537,6 @@ nodeType.prototype.findTextElementAtPos = function(mouseX, mouseY) {
         const metrics = ctx.measureText(textEl.text);
         const textWidth = metrics.width;
         const textHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent || preview_size;
-
         if (mouseX >= preview_x && mouseX <= preview_x + textWidth &&
             mouseY >= preview_y && mouseY <= preview_y + textHeight) 
         {
@@ -593,20 +544,16 @@ nodeType.prototype.findTextElementAtPos = function(mouseX, mouseY) {
             return textEl;
         }
     }
-
     ctx.restore();
     return null;
 };
-
 nodeType.prototype.editTextElement = function(textElement) {
     if (this.toolbar.activeTextarea) this.toolbar.activeTextarea.remove();
-
     const metrics = this.getTextPreviewMetrics(textElement);
     if (!metrics) {
-        console.error("LayerSystem: Impossible de trouver la position du texte pour l'édition.");
+        console.error("[Layer System] Unable to find text position for editing.");
         return;
     }
-
     const canvasRect = this.previewCanvas.getBoundingClientRect();
     const finalLeft = canvasRect.left + metrics.x;
     const finalTop = canvasRect.top + metrics.y;
@@ -615,7 +562,6 @@ nodeType.prototype.editTextElement = function(textElement) {
     this.toolbar.activeTextarea = textInput;
     textInput.contentEditable = true;
     textInput.innerText = textElement.text;
-
     Object.assign(textInput.style, {
         position: 'fixed',
         left: `${finalLeft}px`,
@@ -630,13 +576,10 @@ nodeType.prototype.editTextElement = function(textElement) {
         minWidth: `${metrics.width}px`,
         whiteSpace: 'pre-wrap'
     });
-
     document.body.appendChild(textInput);
     textInput.focus();
     document.execCommand('selectAll', false, null);
-
     textInput.addEventListener('keydown', (evt) => evt.stopPropagation());
-
     const onFinish = () => {
         const newText = textInput.innerText;
         
@@ -646,7 +589,6 @@ nodeType.prototype.editTextElement = function(textElement) {
         } else {
             textElement.text = newText;
         }
-
         this.updatePropertiesJSON();
         this.redrawPreviewCanvas();
         
@@ -654,7 +596,6 @@ nodeType.prototype.editTextElement = function(textElement) {
         this.toolbar.activeTextarea = null;
         this.toolbar.hideContextualToolbar();
     };
-
     textInput.addEventListener('blur', onFinish);
     textInput.addEventListener('keydown', (evt) => {
         evt.stopPropagation();
@@ -665,17 +606,14 @@ nodeType.prototype.editTextElement = function(textElement) {
         if (evt.key === 'Escape') {
             textInput.innerText = textElement.text;
             onFinish();
-
         }
     });
 };
-
 nodeType.prototype.showTextContextMenu = function(clientX, clientY, textElement) {
     const existingMenu = document.getElementById("text-context-menu");
     if (existingMenu) existingMenu.remove();
     
     this.activeTextObject = textElement;
-
     const menu = document.createElement("div");
     menu.id = "text-context-menu";
     Object.assign(menu.style, {
@@ -683,7 +621,6 @@ nodeType.prototype.showTextContextMenu = function(clientX, clientY, textElement)
         border: '1px solid #555', borderRadius: '4px', padding: '5px', zIndex: '10000',
         display: 'flex', flexDirection: 'column',
     });
-
     const actionNames = ['Modifier le texte', 'Déplacer', 'Redimensionner', 'Pivoter', 'Supprimer'];
     
     actionNames.forEach(actionName => {
@@ -696,15 +633,13 @@ nodeType.prototype.showTextContextMenu = function(clientX, clientY, textElement)
         button.onmouseover = () => button.style.backgroundColor = '#555';
         button.onmouseout = () => button.style.backgroundColor = '#444';
         
-button.onclick = (e) => {
+        button.onclick = (e) => {
             menu.remove();
-
             const currentTextElement = this.toolbar.textElements.find(el => el.id === textElement.id);
             if (!currentTextElement) {
                 console.log("L'élément texte a été supprimé, action annulée.");
                 return;
             }
-
             switch (actionName) {
                 case 'Modifier le texte':
                     this.editTextElement(currentTextElement);
@@ -724,12 +659,9 @@ button.onclick = (e) => {
                     break;
             }
         };
-
         menu.appendChild(button);
     });
-
     document.body.appendChild(menu);
-
     const closeMenuHandler = (e) => {
         if (!menu.contains(e.target)) {
             menu.remove();
@@ -739,34 +671,23 @@ button.onclick = (e) => {
     
     setTimeout(() => document.addEventListener('mousedown', closeMenuHandler, true), 0);
 };
-
 nodeType.prototype.onCanvasMouseDown = function(e) {
-	console.log("---");
-    console.log("1. Clic détecté sur le canvas.");
     const mouseX = e.offsetX;
     const mouseY = e.offsetY;
-
     if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
         this.toolbar.handleClick(e, mouseX, mouseY);
         return;
     }
-
     if (this.toolbar.activeTool) {
-		console.log("2. Condition 'this.toolbar.activeTool' est VRAIE. Appel de handleCanvasClick...");
         this.toolbar.handleCanvasClick(e);
         return;
     }
-
     if (!this.movingLayer) {
-		console.log("-> Arrêt : Aucun outil actif et aucun calque en mouvement.");
         return;
     }
-
     const props = this.layer_properties[this.movingLayer];
     if (!props) return;
-
     const handle = this.getHandleAtPos(e);
-
     if (handle && handle !== 'rotate') {
         this.interactionMode = "scaling_" + handle;
         this.dragStart = { x: e.clientX, y: e.clientY };
@@ -793,13 +714,11 @@ nodeType.prototype.onCanvasMouseDown = function(e) {
     e.preventDefault();
     e.stopPropagation();
 };
-
 nodeType.prototype.getHandleAtPos = function(e) {
     if (!this.movingLayer || !this.movingLayerBounds || !this.previewCanvas) return null;
     
     const mouseX = e.offsetX;
     const mouseY = e.offsetY;
-
     const handleSize = 12;
     const bounds = this.movingLayerBounds;
     
@@ -807,7 +726,6 @@ nodeType.prototype.getHandleAtPos = function(e) {
     const angleInRadians = (props.rotation || 0) * Math.PI / 180;
     const centerX = bounds.x + bounds.w / 2;
     const centerY = bounds.y + bounds.h / 2;
-
     const cos = Math.cos(-angleInRadians);
     const sin = Math.sin(-angleInRadians);
     const dx = mouseX - centerX;
@@ -823,19 +741,16 @@ nodeType.prototype.getHandleAtPos = function(e) {
         rotatedMouseY >= rotHandleY_unrotated - rotHandleSize / 2 && rotatedMouseY <= rotHandleY_unrotated + rotHandleSize / 2) {
         return "rotate";
     }
-
     const corners = {
         tl: { x: bounds.x, y: bounds.y },
         tr: { x: bounds.x + bounds.w, y: bounds.y },
         bl: { x: bounds.x, y: bounds.y + bounds.h },
         br: { x: bounds.x + bounds.w, y: bounds.y + bounds.h }
     };
-
     for (const key in corners) {
         const corner = corners[key];
         const handleX = corner.x;
         const handleY = corner.y;
-
         if (rotatedMouseX >= handleX - handleSize/2 && rotatedMouseX <= handleX + handleSize/2 &&
             rotatedMouseY >= handleY - handleSize/2 && rotatedMouseY <= handleY + handleSize/2) {
             return key;
@@ -845,14 +760,14 @@ nodeType.prototype.getHandleAtPos = function(e) {
 };
         
         nodeType.prototype.onCanvasMouseMove = function(e) {
-	    if (this.textActionMode === 'moving' && this.activeTextObject) {
+        if (this.textActionMode === 'moving' && this.activeTextObject) {
  if (this.isTextDragging && this.activeTextObject) {
         this.activeTextObject.x = e.offsetX + this.dragOffset.x;
         this.activeTextObject.y = e.offsetY + this.dragOffset.y;
         this.redrawPreviewCanvas();
         return;
     }
-		}
+        }
             if (this.interactionMode.startsWith("scaling_")) {
                 if (this.interactionMode === "scaling_tl" || this.interactionMode === "scaling_br") {
                     this.previewCanvas.style.cursor = "nwse-resize";
@@ -882,10 +797,8 @@ nodeType.prototype.getHandleAtPos = function(e) {
             
             const props = this.layer_properties[this.movingLayer];
             if (!props) return;
-
             const dx = e.clientX - this.dragStart.x;
             const dy = e.clientY - this.dragStart.y;
-
             if (this.interactionMode === "moving") {
                 if (!this.isDragging) return;
                 const baseImg = this.basePreviewImage;
@@ -910,7 +823,6 @@ nodeType.prototype.getHandleAtPos = function(e) {
                 
                 const newScale = this.initialScale * (newWidth / this.initialBounds.w);
                 props.scale = newScale;
-
  } else if (this.interactionMode === "rotating") {
     const mouseX = e.offsetX;
     const mouseY = e.offsetY;
@@ -937,7 +849,6 @@ nodeType.prototype.getHandleAtPos = function(e) {
             this.graph.setDirtyCanvas(true, true);
             this.redrawPreviewCanvas();
         };
-
       nodeType.prototype.onCanvasMouseUp = function(e) {
       if (this.isTextDragging) {
         this.updatePropertiesJSON();
@@ -952,7 +863,6 @@ nodeType.prototype.getHandleAtPos = function(e) {
                 this.updatePropertiesJSON();
             }
         };
-
         nodeType.prototype.onCanvasMouseLeave = function(e) {
             if (this.previewCanvas) {
                 this.previewCanvas.style.cursor = "default";
@@ -970,7 +880,6 @@ nodeType.prototype.getHandleAtPos = function(e) {
                 const layer_index = i;
                 const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
                 if (!anchor || !anchor.inputEl || anchor.canvas) continue;
-
                 const canvas = document.createElement("canvas");
                 anchor.canvas = canvas;
                 
@@ -987,7 +896,6 @@ nodeType.prototype.getHandleAtPos = function(e) {
                     const widgetWidth = this.size[0] - 20;
                     const x = e.offsetX;
                     const y = e.offsetY;
-
                     const topPadding = 4;
                     const padding = 8;
                     const moveIconSize = 36;
@@ -996,25 +904,21 @@ nodeType.prototype.getHandleAtPos = function(e) {
                     const thumbSize = 48;
                     const eyeSize = 36;
                     const allocatedHeight = 64;
-
                     const eyeX = widgetWidth - eyeSize - padding;
                     const thumbX = eyeX - thumbSize - padding;
                     const lockX = thumbX - lockSize - padding;
                     const arrowBlockX = lockX - arrowSize - padding;
                     const moveIconX = arrowBlockX - moveIconSize - (padding * 2);
-
                     const eyeY = topPadding + (thumbSize - eyeSize) / 2;
                     const lockY = topPadding + (thumbSize - lockSize) / 2;
                     const arrowUpY = topPadding + (thumbSize / 2 - arrowSize) + 4;
                     const arrowDownY = topPadding + (thumbSize / 2) - 4;
                     const moveIconY = topPadding + (thumbSize - moveIconSize) / 2;
-
                     const isInEye = x >= eyeX && x <= eyeX + eyeSize && y >= eyeY && y <= eyeY + eyeSize;
                     const isInLock = x >= lockX && x <= lockX + lockSize && y >= lockY && y <= lockY + lockSize;
                     const isInUpArrow = x >= arrowBlockX && x <= arrowBlockX + arrowSize && y >= arrowUpY && y <= arrowUpY + arrowSize;
                     const isInDownArrow = x >= arrowBlockX && x <= arrowBlockX + arrowSize && y >= arrowDownY && y <= arrowDownY + arrowSize;
                     const isInMoveIcon = x >= moveIconX && x <= moveIconX + moveIconSize && y >= moveIconY && y <= moveIconY + moveIconSize;
-
                     if (isInLock) {
                         this.accordionMode = !this.accordionMode;
                         this.refreshUI();
@@ -1036,7 +940,6 @@ nodeType.prototype.getHandleAtPos = function(e) {
                         this.refreshUI();
                     } else {
                         const isExpanding = props.layer_collapsed;
-
                         if (isExpanding) {
                             if (this.accordionMode) {
                                 for (const otherLayerName in this.layer_properties) {
@@ -1060,35 +963,27 @@ nodeType.prototype.getHandleAtPos = function(e) {
                         
                         this.refreshUI();
                     }
-
                     this.updatePropertiesJSON();
                 });
             }
         };
-
         nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
             if (!canvas || !this.layer_properties[layerName]) return;
-
             const props = this.layer_properties[layerName];
             const layer_index = parseInt(layerName.split("_")[1]);
             const total_layers = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).length;
             const layerImage = this.loaded_preview_images ? this.loaded_preview_images[layerName] : null;
-
             const ctx = canvas.getContext("2d");
             const widgetWidth = this.size[0] - 20;
             const allocatedHeight = 64;
             const ratio = window.devicePixelRatio || 1;
-
             canvas.style.width = widgetWidth + "px";
             canvas.style.height = allocatedHeight + "px";
             canvas.width = widgetWidth * ratio;
             canvas.height = allocatedHeight * ratio;
-
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.scale(ratio, ratio);
-
             ctx.clearRect(0, 0, widgetWidth, allocatedHeight);
-
             ctx.strokeStyle = "#555555";
             ctx.lineWidth = 2;
             ctx.strokeRect(1, 1, widgetWidth - 2, allocatedHeight - 10);
@@ -1115,19 +1010,16 @@ nodeType.prototype.getHandleAtPos = function(e) {
             const arrowUpY = topPadding + (thumbSize / 2 - arrowSize) + 4;
             const arrowDownY = topPadding + (thumbSize / 2) - 4;
             const moveIconY = topPadding + (thumbSize - moveIconSize) / 2;
-
             if (!props.layer_collapsed) {
                 ctx.fillStyle = "#4CAF50"; 
             } else {
                 ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
             }
-
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
             ctx.font = "14px Arial";
             const triangle = props.layer_collapsed ? "▶" : "▼";
             ctx.fillText(`${triangle} Layer ${layer_index} Settings`, 5, textY, textMaxWidth);
-
             const isFirst = layer_index <= 1;
             const isLast = layer_index >= total_layers;
             const disabledColor = "#555";
@@ -1162,7 +1054,6 @@ nodeType.prototype.getHandleAtPos = function(e) {
             ctx.lineWidth = 2;
             ctx.stroke(this.accordionMode ? lockIconPath : unlockIconPath);
             ctx.restore();
-
             ctx.fillStyle = "#353535";
             ctx.fillRect(thumbX, thumbY, thumbSize, thumbSize);
             if (layerImage && layerImage.naturalWidth > 0) {
@@ -1187,11 +1078,9 @@ nodeType.prototype.getHandleAtPos = function(e) {
         nodeType.prototype.updateLayerVisibility = function(layerName) {
             const props = this.layer_properties[layerName];
             if (!props) return;
-
             const isLayerCollapsed = props.layer_collapsed;
             const isColorCollapsed = props.color_section_collapsed;
             const showTransformForCrop = props.resize_mode === 'crop';
-
             const allWidgets = this.widgets.filter(w => 
                 (w.name && typeof w.name === 'string' && w.name.endsWith(`_${layerName}`)) || 
                 (w.value && typeof w.value === 'string' && w.value.endsWith(`_${layerName}`))
@@ -1199,13 +1088,10 @@ nodeType.prototype.getHandleAtPos = function(e) {
             
             for(const w of allWidgets) {
                 if (w.name.startsWith(`header_anchor_`)) continue;
-
                 let isHidden = isLayerCollapsed;
-
                 if (w.name.startsWith("spacer_for_")) {
                     isHidden = false;
                 } else if (w.name === `toggle_color_${layerName}`) {
-
                 } else if (["brightness", "contrast", "saturation", "color_r", "color_g", "color_b"].some(p => w.name.startsWith(p))) {
                     isHidden = isLayerCollapsed || isColorCollapsed;
                 } else if (["scale", "offset_x", "offset_y", "rotation"].some(p => w.name.startsWith(p))) {
@@ -1224,13 +1110,20 @@ nodeType.prototype.getHandleAtPos = function(e) {
             this.handleDisconnectedInputs();
             this.updateLayerWidgets();
             this.ensureWildcardInputs();
-            
+  
+            const connectedLayers = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null);
+            if (connectedLayers.length === 1) {
+                const layerName = connectedLayers[0].name;
+                if (this.layer_properties[layerName]) {
+                    this.layer_properties[layerName].layer_collapsed = false;
+                }
+            }
+  
             const activeLayers = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
             for (let i = 1; i <= MAX_LAYERS; i++) {
                 const layerName = `layer_${i}`;
                 const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
                 if (!anchor) continue;
-
                 if (activeLayers.has(layerName)) {
                     anchor.hidden = false;
                     anchor.computeSize = (width) => [width, 64];
@@ -1243,7 +1136,15 @@ nodeType.prototype.getHandleAtPos = function(e) {
                     anchor.computeSize = () => [0, -4];
                 }
             }
-            this.updatePropertiesJSON();
+        if (this.toolbar) {
+          if (this.toolbar.activeTool === 'mask') {
+            this.toolbar.maskManager.show();
+        } else {
+            this.toolbar.maskManager.hide();
+        }
+    }
+            
+			this.updatePropertiesJSON();
             resizeHeight.call(this);
         };
         
@@ -1253,7 +1154,6 @@ nodeType.prototype.getHandleAtPos = function(e) {
             const name_B = `layer_${swap_index}`;
             const mask_name_A = name_A.replace("layer_", "mask_");
             const mask_name_B = name_B.replace("layer_", "mask_");
-
             const input_A = this.inputs.find(i => i.name === name_A);
             const input_B = this.inputs.find(i => i.name === name_B);
             const mask_input_A = this.inputs.find(i => i.name === mask_name_A);
@@ -1273,28 +1173,37 @@ nodeType.prototype.getHandleAtPos = function(e) {
             const mask_img_A = this.loaded_preview_images[mask_name_A];
             this.loaded_preview_images[mask_name_A] = this.loaded_preview_images[mask_name_B]; this.loaded_preview_images[mask_name_B] = mask_img_A;
             
+            if (this.preview_data) {
+                const layer_data_A = this.preview_data[name_A];
+                this.preview_data[name_A] = this.preview_data[name_B];
+                this.preview_data[name_B] = layer_data_A;
+                
+                const mask_data_A = this.preview_data[mask_name_A];
+                this.preview_data[mask_name_A] = this.preview_data[mask_name_B];
+                this.preview_data[mask_name_B] = mask_data_A;
+            }
+			
             if (input_A.link !== null) this.graph.links[input_A.link].target_slot = this.inputs.indexOf(input_A);
             if (input_B.link !== null) this.graph.links[input_B.link].target_slot = this.inputs.indexOf(input_B);
             if (mask_input_A && mask_input_A.link !== null) this.graph.links[mask_input_A.link].target_slot = this.inputs.indexOf(mask_input_A);
             if (mask_input_B && mask_input_B.link !== null) this.graph.links[mask_input_B.link].target_slot = this.inputs.indexOf(mask_input_B);
-
             if (this.movingLayer === name_A) {
                 this.movingLayer = name_B;
             } else if (this.movingLayer === name_B) {
                 this.movingLayer = name_A;
             }
-
             this.refreshUI();
             this.redrawPreviewCanvas();
         };
-
 nodeType.prototype.addLayerWidgets = function(layer_name) {
     if (!this.layer_properties[layer_name]) {
         this.layer_properties[layer_name] = {
-            blend_mode: "normal", opacity: 1.0, enabled: true, resize_mode: "fit", scale: 1.0, offset_x: 0, offset_y: 0,
+            blend_mode: "normal", opacity: 1.0, enabled: true, resize_mode: "crop", scale: 1.0, offset_x: 0, offset_y: 0,
             rotation: 0.0,
             brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0, 
             invert_mask: false, color_section_collapsed: true, layer_collapsed: true,
+			internal_mask_filename: null,
+            internal_mask_details: null,
         };
     }
     const props = this.layer_properties[layer_name];
@@ -1302,7 +1211,6 @@ nodeType.prototype.addLayerWidgets = function(layer_name) {
     const topSpacer = { name: `top_spacer_for_${layer_name}`, type: "CUSTOM_SPACER", draw: () => {}, computeSize: () => [0, 10] };
     this.widgets.push(topSpacer);
     allWidgets.push(topSpacer);
-
     const redrawCallback = (prop, v) => { 
         props[prop] = v; 
         this.updatePropertiesJSON(); 
@@ -1328,19 +1236,17 @@ nodeType.prototype.addLayerWidgets = function(layer_name) {
     }));
     const resizeModeWidget = this.addWidget("combo", `resize_mode_${layer_name}`, props.resize_mode, (v) => {
         props.resize_mode = v; if (v !== 'crop' && this.movingLayer === layer_name) { this.movingLayer = null; }
-        this.refreshUI();		
-		this.updatePropertiesJSON(); this.redrawPreviewCanvas();
+        this.refreshUI();        
+        this.updatePropertiesJSON(); this.redrawPreviewCanvas();
     }, { values: RESIZE_MODES });
     allWidgets.push(resizeModeWidget);
     allWidgets.push(this.addWidget("number", `scale_${layer_name}`, props.scale, (v) => redrawCallback('scale', v), {min: 0.01, max: 10.0, step: 0.1, precision: 2 }));
     allWidgets.push(this.addWidget("number", `offset_x_${layer_name}`, props.offset_x, (v) => redrawCallback('offset_x', v), {min: -8192, max: 8192, step: 1 }));
     allWidgets.push(this.addWidget("number", `offset_y_${layer_name}`, props.offset_y, (v) => redrawCallback('offset_y', v), {min: -8192, max: 8192, step: 1 }));
     allWidgets.push(this.addWidget("number", `rotation_${layer_name}`, props.rotation, (v) => redrawCallback('rotation', v), {min: -360.0, max: 360.0, step: 1, precision: 1 }));
-
     const bottomSpacer = { name: `bottom_spacer_for_${layer_name}`, type: "CUSTOM_SPACER", draw: () => {}, computeSize: () => [0, 10] };
     this.widgets.push(bottomSpacer);
     allWidgets.push(bottomSpacer);
-
     for (const w of allWidgets) { 
         if (!w.originalComputeSize) w.originalComputeSize = w.computeSize;
     }
@@ -1355,34 +1261,100 @@ nodeType.prototype.addLayerWidgets = function(layer_name) {
             for(const w of this.widgets) {
                 if (w.name.startsWith('blend_mode_')) existingWidgets.add(w.name.replace('blend_mode_', ''));
             }
-
             for (const input of connectedInputs) {
                 if (!existingWidgets.has(input.name)) {
                    this.addLayerWidgets(input.name);
                 }
             }
         };
+nodeType.prototype.handleDisconnectedInputs = function() {
+    const connected_layer_names = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
+    const inputs_to_remove = [];
+    const props_to_remove = [];
 
-        nodeType.prototype.handleDisconnectedInputs = function() {
-            const connected_layer_names = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
-            const props_to_remove = [];
-            for (const key in this.layer_properties) {
-                if (!connected_layer_names.has(key)) {
-                    props_to_remove.push(key);
-                }
+    for (const key in this.layer_properties) {
+        if (!connected_layer_names.has(key)) {
+            props_to_remove.push(key);
+            const layer_input = this.inputs.find(i => i.name === key);
+            if(layer_input) inputs_to_remove.push(layer_input);
+            const mask_input = this.inputs.find(i => i.name === key.replace("layer_", "mask_"));
+            if(mask_input) inputs_to_remove.push(mask_input);
+        }
+    }
+
+    props_to_remove.forEach(key => delete this.layer_properties[key]);
+    inputs_to_remove.sort((a,b) => this.inputs.indexOf(b) - this.inputs.indexOf(a)).forEach(i => this.removeInput(this.inputs.indexOf(i)));
+    
+    const final_props = {};
+    const final_images = {};
+    const final_data = {};
+
+    for (const key in this.loaded_preview_images) {
+        if (!key.startsWith("layer_") && !key.startsWith("mask_")) {
+            final_images[key] = this.loaded_preview_images[key];
+        }
+    }
+    if (this.preview_data) {
+        for (const key in this.preview_data) {
+            if (!key.startsWith("layer_") && !key.startsWith("mask_")) {
+                final_data[key] = this.preview_data[key];
             }
-            props_to_remove.forEach(key => {
-                delete this.layer_properties[key];
-                if (this.movingLayer === key) this.movingLayer = null;
-                const widgets_to_remove = this.widgets.filter(w => w.name.endsWith(`_${key}`));
-                widgets_to_remove.forEach(w => this.widgets.splice(this.widgets.indexOf(w), 1));
-            });
-        };
+        }
+    }
+    
+    const remaining_layers = this.inputs.filter(i => i.name.startsWith("layer_"));
+    remaining_layers.sort((a, b) => this.inputs.indexOf(a) - this.inputs.indexOf(b));
+
+    remaining_layers.forEach((input, i) => {
+        const old_name = input.name;
+        const new_name = `layer_${i + 1}`;
+        const old_mask_name = old_name.replace("layer_", "mask_");
+        const new_mask_name = new_name.replace("layer_", "mask_");
+
+        if (this.layer_properties[old_name]) {
+            final_props[new_name] = this.layer_properties[old_name];
+        }
+        
+        if (this.loaded_preview_images[old_name]) {
+            final_images[new_name] = this.loaded_preview_images[old_name];
+        }
+        if (this.loaded_preview_images[old_mask_name]) {
+            final_images[new_mask_name] = this.loaded_preview_images[old_mask_name];
+        }
+
+        if (this.preview_data && this.preview_data[old_name]) {
+            final_data[new_name] = this.preview_data[old_name];
+        }
+        if (this.preview_data && this.preview_data[old_mask_name]) {
+            final_data[new_mask_name] = this.preview_data[old_mask_name];
+        }
+
+        input.name = new_name;
+        const mask_input = this.inputs.find(m => m.name === old_mask_name);
+        if (mask_input) {
+            mask_input.name = new_mask_name;
+        }
+    });
+
+    this.layer_properties = final_props;
+    this.loaded_preview_images = final_images;
+    this.preview_data = final_data;
+	
+    const finalLayerNames = Object.keys(this.layer_properties);
+    if (finalLayerNames.length > 0) {
+        const isAnyLayerExpanded = finalLayerNames.some(name =>
+            !this.layer_properties[name].layer_collapsed
+        );
+
+        if (!isAnyLayerExpanded) {
+            this.layer_properties[finalLayerNames[0]].layer_collapsed = false;
+        }
+    }
+};
         
         nodeType.prototype.ensureWildcardInputs = function () {
             const layerInputs = this.inputs.filter(i => i.name.startsWith("layer_"));
             if(layerInputs.length >= MAX_LAYERS) return;
-
             const lastLayerInput = layerInputs.sort((a,b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).pop();
             if (!lastLayerInput || lastLayerInput.link !== null) {
                 const newIndex = lastLayerInput ? parseInt(lastLayerInput.name.split("_")[1]) + 1 : 1;
@@ -1393,7 +1365,6 @@ nodeType.prototype.addLayerWidgets = function(layer_name) {
         };
         
 nodeType.prototype.updatePropertiesJSON = function() {
-    // 1. Mise à jour du widget de données principal
     const mainDataWidget = this.widgets.find(w => w.name === "_layer_system_data" || w.name === "_properties_json");
     if (mainDataWidget) {
         const full_properties = {
@@ -1405,13 +1376,11 @@ nodeType.prototype.updatePropertiesJSON = function() {
         };
         mainDataWidget.value = JSON.stringify(full_properties);
     }
-
-    // 2. Neutralisation des widgets d'ancrage pour éviter les doublons
     this.widgets.forEach(widget => {
         if (widget.name.includes("_anchor")) {
             widget.value = null;
         }
     });
-};
-    },
-});
+   };
+  },
+}); 
