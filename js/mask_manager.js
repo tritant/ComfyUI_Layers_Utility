@@ -10,7 +10,6 @@ function standardizeMaskFromEditor(editorImage) {
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
         const alpha = data[i + 3];
-        // Opaque -> Blanc (255), Transparent -> Noir (0)
         const value = (alpha > 128) ? 0 : 255;
         data[i] = value;
         data[i + 1] = value;
@@ -18,74 +17,6 @@ function standardizeMaskFromEditor(editorImage) {
         data[i + 3] = 255;
     }
     ctx.putImageData(imageData, 0, 0);
-    return canvas;
-}
-
-function convertMaskToEditorFormat(cleanMask) {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    canvas.width = cleanMask.naturalWidth;
-    canvas.height = cleanMask.naturalHeight;
-    ctx.drawImage(cleanMask, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-        const luminance = data[i];
-        
-        if (luminance < 110) { 
-            data[i] = 0;     // Rouge
-            data[i + 1] = 0; // Vert
-            data[i + 2] = 0; // Bleu
-            data[i + 3] = 0; // Opaque
-        } 
-        else {
-            data[i + 3] = 255;
-        }
-    }
-    ctx.putImageData(imageData, 0, 0);
-    return canvas;
-}
-
-function createEditorImage(layerImage, maskForProcessing) {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = layerImage.naturalWidth;
-    canvas.height = layerImage.naturalHeight;
-
-    ctx.drawImage(layerImage, 0, 0);
-    ctx.globalCompositeOperation = 'destination-in';
-    
-    // Créer un masque temporaire inversé (blanc sur noir)
-    const tempInvertedMask = document.createElement('canvas');
-    const tempCtx = tempInvertedMask.getContext('2d');
-
-    // ▼▼▼ LA CORRECTION EST ICI ▼▼▼
-    // On récupère la largeur et la hauteur, que la source soit une Image ou un Canvas
-    const maskWidth = maskForProcessing.naturalWidth || maskForProcessing.width;
-    const maskHeight = maskForProcessing.naturalHeight || maskForProcessing.height;
-    
-    tempInvertedMask.width = maskWidth;
-    tempInvertedMask.height = maskHeight;
-    // ▲▲▲ FIN DE LA CORRECTION ▲▲▲
-
-    tempCtx.filter = 'invert(1)';
-    tempCtx.drawImage(maskForProcessing, 0, 0);
-
-    // On applique ce masque inversé pour créer le canal alpha
-    ctx.drawImage(tempInvertedMask, 0, 0);
-    
-    ctx.globalCompositeOperation = 'source-over';
-    return canvas;
-}
-
-function applyMask(layerImage, maskImage) {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = layerImage.naturalWidth;
-    canvas.height = layerImage.naturalHeight;
-    ctx.drawImage(layerImage, 0, 0);
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(maskImage, 0, 0, canvas.width, canvas.height);
     return canvas;
 }
 
@@ -105,7 +36,7 @@ export class MaskManager {
         formData.append("overwrite", "true");
         formData.append("type", type);
         const response = await fetch("/upload/image", { method: "POST", body: formData });
-        if (response.status !== 200) throw new Error(`Échec de l'upload: ${response.status}`);
+        if (response.status !== 200) throw new Error(`Upload failed: ${response.status}`);
         return await response.json();
     }
 
@@ -150,10 +81,10 @@ export class MaskManager {
 
     async handleCreateMask() {
         this.activeLayer = this.getActiveLayer();
-        if (!this.activeLayer) return alert("Erreur : Aucun calque actif.");
+        if (!this.activeLayer) return alert("Erreur : No active layer.");
         try {
             const sourceImage = await this.getSourceImageForActiveLayer();
-            if (!sourceImage) throw new Error("Image source introuvable.");
+            if (!sourceImage) throw new Error("Source image not found.");
 
             const tempNode = LiteGraph.createNode("LoadImage");
             ComfyApp.copyToClipspace({ imgs: [sourceImage] });
@@ -163,37 +94,36 @@ export class MaskManager {
             ComfyApp.onClipspaceEditorClosed = () => {
                 if (tempNode.imgs && tempNode.imgs[0]) this.returned_image = tempNode.imgs[0];
                 ComfyApp.onClipspaceEditorClosed = original_onClipspaceEditorClosed;
-                setTimeout(() => this.handleMaskEditorClose(this.activeLayer), 0);
+                setTimeout(() => this.handleMaskEditorClose(this.activeLayer), 100);
             };
 			this.hide(); 
             ComfyApp.open_maskeditor();
         } catch (error) {
-            console.error("Erreur lors de la création du masque :", error);
-            alert(`Erreur : ${error.message}`);
+            console.error("[Layer System] Error creating mask :", error);
         }
     }
 
 async handleEditMask() {
     this.activeLayer = this.getActiveLayer();
-    if (!this.activeLayer) return alert("Erreur : Aucun calque actif.");
+    if (!this.activeLayer) return alert("Erreur : No active layer.");
     
     const layerProps = this.node.layer_properties[this.activeLayer.name];
     if (!layerProps || !layerProps.internal_mask_details) {
-        return alert("Ce calque n'a pas de masque interne éditable.");
+        return alert("This layer does not have an editable internal mask.");
     }
 
     try {
         const sourceImage = await this.getSourceImageForActiveLayer();
 
         if (!sourceImage || !sourceImage.complete || sourceImage.naturalWidth === 0) {
-            console.warn("[Layer System] L'image source n'était pas prête. Attente du chargement...");
+            console.warn("[Layer System] The source image was not ready. Waiting for loading...");
             if (sourceImage && sourceImage.src) {
                 await new Promise((resolve, reject) => {
                     if (sourceImage.complete) { resolve(); } 
                     else { sourceImage.onload = resolve; sourceImage.onerror = reject; }
                 });
             } else {
-                throw new Error("Image source trouvée mais invalide.");
+                throw new Error("Source image found but invalid.");
             }
         }
         
@@ -219,7 +149,7 @@ async handleEditMask() {
         ComfyApp.onClipspaceEditorClosed = () => {
             if (tempNode.imgs && tempNode.imgs[0]) { this.returned_image = tempNode.imgs[0]; }
             ComfyApp.onClipspaceEditorClosed = original_onClipspaceEditorClosed;
-            setTimeout(() => this.handleMaskEditorClose(this.activeLayer), 0);
+            setTimeout(() => this.handleMaskEditorClose(this.activeLayer), 100);
         };
         
         this.hide();
@@ -234,12 +164,7 @@ async handleEditMask() {
             const editorCanvas = document.getElementById('maskCanvas');
 
             if (editorCanvas && editorCanvas.width > 0 && editorCanvas.style.display !== 'none') {
-                
-                // ▼▼▼ LA CORRECTION DE TIMING EST ICI ▼▼▼
-                // L'éditeur est visible, mais on attend un court instant pour le laisser finir son propre dessin.
                 setTimeout(() => {
-                    console.log("[Layer System] Éditeur stabilisé. Application du masque.");
-                    
                     let whiteOnBlackMask;
                     if (maskDetails.name.includes("_rbg_") || maskDetails.name.includes("_render_")) {
                         const invertedCanvas = document.createElement('canvas');
@@ -272,24 +197,22 @@ async handleEditMask() {
                     finalCtx.putImageData(imageData, 0, 0);
 
                     const editorCtx = editorCanvas.getContext('2d');
-                    if (editorCtx) { // Sécurité supplémentaire
+                    if (editorCtx) {
                         editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
                         editorCtx.drawImage(finalMaskForEditor, 0, 0, editorCanvas.width, editorCanvas.height);
                     }
-                }, 350); // On attend 250ms, un délai généralement suffisant
-                // ▲▲▲ FIN DE LA CORRECTION ▲▲▲
+                }, 450);
 
             } else if (attempts < maxAttempts) {
-                setTimeout(checkEditor, 100);
+                setTimeout(checkEditor, 300);
             } else {
-                console.error("[LayerSystem] Timeout: L'éditeur de masque ne s'est pas initialisé.");
+                console.error("[Layer System] Timeout: The mask editor did not initialize.");
             }
         };
-        setTimeout(checkEditor, 100);
+        setTimeout(checkEditor, 300);
 
     } catch (error) {
-        console.error("Erreur lors de la ré-édition du masque :", error);
-        alert(`Erreur : ${error.message}`);
+        console.error("[Layer System] Error re-editing mask :", error);
     }
 }
     async handleMaskEditorClose(activeLayer) {
@@ -329,11 +252,9 @@ async handleEditMask() {
                 this.node.loaded_preview_images[maskName] = previewMaskImage;
             }
         } catch (e) {
-            console.error("[LayerSystem] Erreur critique lors du traitement du masque.", e);
-            alert("Une erreur est survenue.");
-        }
+            console.error("[Layer System] Critical error while processing mask.", e);
+         }
         
-        //this.updateToolbarState();
 		this.show();
         this.node.redrawPreviewCanvas();
         this.node.setDirtyCanvas(true, true);
@@ -373,7 +294,6 @@ createContextualToolbar() {
     buttonContainer.style.display = 'flex';
     buttonContainer.style.gap = '5px';
 
-    // --- Conteneurs pour les boutons qui apparaissent/disparaissent ---
     const creationContainer = document.createElement("div");
     creationContainer.className = 'creation-tools';
     creationContainer.style.display = 'flex';
@@ -382,20 +302,18 @@ createContextualToolbar() {
     editionContainer.className = 'edition-tools';
     editionContainer.style.display = 'flex';
 
-    // --- Création de TOUS les boutons ---
     const drawMaskButton = document.createElement("button");
-    drawMaskButton.innerText = "Dessiner Masque";
+    drawMaskButton.innerText = "Draw Mask";
     drawMaskButton.onclick = () => this.handleCreateMask();
 
     const reeditMaskButton = document.createElement("button");
-    reeditMaskButton.innerText = "Ré-éditer";
+    reeditMaskButton.innerText = "Edit mask";
     reeditMaskButton.onclick = () => this.handleEditMask();
 
     const deleteMaskButton = document.createElement("button");
-    deleteMaskButton.innerText = "Supprimer";
+    deleteMaskButton.innerText = "Delete mask";
     deleteMaskButton.onclick = () => this.handleDeleteMask();
 
-    // ▼▼▼ LE BOUTON REMOVE BG EST CRÉÉ ICI ▼▼▼
     const removeBgButton = document.createElement("button");
     removeBgButton.innerText = "Remove BG";
     removeBgButton.onclick = () => {
@@ -405,21 +323,13 @@ createContextualToolbar() {
         }
     };
 
-    // --- Assemblage Logique ---
-    // On place les boutons dans leurs conteneurs respectifs
     creationContainer.append(drawMaskButton);
     editionContainer.append(reeditMaskButton, deleteMaskButton);
 
-    // On ajoute les conteneurs au container principal
     buttonContainer.append(creationContainer, editionContainer);
 
-    // ▼▼▼ MODIFICATION CLÉ ▼▼▼
-    // On ajoute le bouton "Remove BG" à part. Il ne sera donc pas affecté
-    // par la logique qui cache/affiche creationContainer et editionContainer.
     buttonContainer.append(removeBgButton);
-    // ▲▲▲ FIN DE LA MODIFICATION ▲▲▲
 
-    // On applique le style à tous les boutons en une seule fois
     [drawMaskButton, reeditMaskButton, deleteMaskButton, removeBgButton].forEach(btn => {
         Object.assign(btn.style, {
             backgroundColor: '#444', color: 'white', border: '1px solid #666',
@@ -429,7 +339,6 @@ createContextualToolbar() {
         btn.onmouseout = () => btn.style.backgroundColor = '#444';
     });
     
-    // --- Reste de la fonction (Preview, etc.) ---
     const previewContainer = document.createElement("div");
     Object.assign(previewContainer.style, {
         width: '64px', height: '64px', border: '1px solid #555',
