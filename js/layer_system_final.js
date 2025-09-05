@@ -1,5 +1,6 @@
 import { app } from "/scripts/app.js";
 import { Toolbar } from './toolbar.js';
+
 function applyMask(layerImage, maskImage) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -63,10 +64,7 @@ app.registerExtension({
                 const previewData = message.layer_previews[0];
                 this.preview_data = previewData;
                 const imagePromises = Object.entries(previewData).map(([name, previewInfo]) => {
-                // On extrait la propriété .url de l'objet previewInfo
                 const url = previewInfo.url; 
-				
-				//const imagePromises = Object.entries(previewData).map(([name, url]) => {
                     return new Promise((resolve, reject) => {
                         const img = new Image();
                         img.crossOrigin = "anonymous";
@@ -75,8 +73,7 @@ app.registerExtension({
                     img.onload = () => resolve({ name, img });
                     img.onerror = (err) => reject(err);
                 } else {
-                    // Si pas d'URL, on considère que c'est une erreur pour ce calque
-                    reject(new Error(`URL de preview manquante pour ${name}`));
+                    reject(new Error(`[Layer System] Missing preview URL for ${name}`));
                 }
             });
         });
@@ -90,30 +87,22 @@ app.registerExtension({
                         resizeHeight.call(this);
                         this.redrawPreviewCanvas();
                     })
-                    .catch(e => console.error("[LayerSystem] Au moins une image d'aperçu n'a pas pu être chargée.", e));
+                    .catch(e => console.error("[Layer System] At least one preview image could not be loaded.", e));
             }
         };
 		
-		
 		const onDrawBackground = nodeType.prototype.onDrawBackground;
         nodeType.prototype.onDrawBackground = function(ctx) {
-        // On appelle la fonction originale de LiteGraph si elle existe
         onDrawBackground?.apply(this, arguments);
-
-        // Si la toolbar et ses menus contextuels sont actifs, on met à jour leur position en continu
         if (this.toolbar) {
-        // Mise à jour de la barre d'outils du MASQUE
         if (this.toolbar.maskManager?.contextualToolbar?.style.display !== 'none') {
             this.toolbar.maskManager.positionToolbar();
         }
-        
-        // Mise à jour de la barre d'outils du TEXTE
         if (this.toolbar.contextualToolbar?.style.display !== 'none') {
             this.toolbar.updateContextualToolbarPosition();
         }
     }
 };
-		
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
@@ -230,36 +219,27 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
         };
         
 nodeType.prototype.onResize = function(size) {
-    // Utilise le flag pour éviter les boucles infinies
     if (this._resizing) return;
     this._resizing = true;
-    // On s'assure que tout est prêt pour le calcul
     if (!this.widgets || !this.size || !this.basePreviewImage || this.basePreviewImage.naturalWidth <= 0) {
         this._resizing = false;
         return;
     }
     
-    // --- Logique de recalcul de la hauteur ---
     const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
     if (anchorWidget) {
         const aspectRatio = this.basePreviewImage.naturalHeight / this.basePreviewImage.naturalWidth;
         const toolbarWidth = this.toolbar ? this.toolbar.width : 0;
         const contentWidth = size[0] - 20 - toolbarWidth;
         const requiredHeight = contentWidth * aspectRatio;
-        
-        // On force temporairement la hauteur du widget de l'aperçu
         anchorWidget.computeSize = () => [size[0], requiredHeight];
     }
     
-    // On force le nœud à recalculer sa hauteur totale
     const newComputedSize = this.computeSize();
     this.size[1] = newComputedSize[1];
-    // On nettoie notre modification temporaire
-    if (anchorWidget?.computeSize) {
+     if (anchorWidget?.computeSize) {
         delete anchorWidget.computeSize;
     }
-    // --- Fin de la logique de recalcul ---
-    // On planifie le redessinage du contenu du canevas
     if (this.previewCanvas) {
         if (this.redraw_req) cancelAnimationFrame(this.redraw_req);
         this.redraw_req = requestAnimationFrame(() => {
@@ -267,7 +247,7 @@ nodeType.prototype.onResize = function(size) {
             this.redraw_req = null;
         });
     }
-    // On redessine les en-têtes des calques
+
     for (let i = 1; i <= 10; i++) { // Remplacer 10 par MAX_LAYERS serait mieux
         const headerAnchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
         if (headerAnchor && headerAnchor.canvas) {
@@ -275,45 +255,33 @@ nodeType.prototype.onResize = function(size) {
         }
     }
     
-    // On baisse le drapeau pour la prochaine action
     this._resizing = false;
 };
 nodeType.prototype.onConfigure = function (info) {
-    // On appelle la fonction originale de LiteGraph si elle existe
     const onConfigureOriginal = nodeType.prototype.__proto__.onConfigure;
     onConfigureOriginal?.apply(this, arguments);
     if (info.widgets_values) {
-        // --- NOUVELLE LOGIQUE DE CHARGEMENT ROBUSTE ---
         let mainDataString = null;
         
-        // On parcourt toutes les valeurs sauvegardées...
         for (const val of info.widgets_values) {
-            // ... et on cherche la première qui est une chaîne de caractères et qui commence par '{"layers":'
             if (typeof val === 'string' && val.startsWith('{"layers":')) {
                 mainDataString = val;
-                break; // On a trouvé nos données, on arrête de chercher.
+                break;
             }
         }
-        // Si on a trouvé notre bloc de données, on le charge.
         if (mainDataString) {
             try {
                 const props = JSON.parse(mainDataString);
                 this.layer_properties = props.layers || {};
-                
-                // On s'assure que la toolbar existe avant de lui assigner les textes
                 if (this.toolbar) {
                     this.toolbar.textElements = props.texts || [];
                 } else {
-                    // Si la toolbar n'est pas prête, on met les données en attente (sécurité)
                     this.loadedTextData = props.texts || [];
                 }
-                
-                console.log("[LayerSystem] Données chargées avec succès depuis le bloc principal.");
-            } catch(e) { console.error("[LayerSystem] Erreur lors de l'analyse du JSON principal dans onConfigure", e); }
+                console.log("[Layer System] Data successfully loaded from main block.");
+            } catch(e) { console.error("[LayerSystem] Error parsing main JSON in onConfigure", e); }
         }
     }
-    
-    // On active les sauvegardes uniquement à la toute fin.
     this.isConfigured = true;
 };
         
@@ -513,10 +481,6 @@ nodeType.prototype.onConfigure = function (info) {
             
             this.toolbar.drawTextElements(ctx);
             this.toolbar.draw(ctx);
-            //if (this.needsFirstSync) {
-              //this.refreshUI();
-              //this.needsFirstSync = false;
-            //}
         };
         
 nodeType.prototype.getTextPreviewMetrics = function(textEl) {
@@ -587,7 +551,7 @@ nodeType.prototype.editTextElement = function(textElement) {
     if (this.toolbar.activeTextarea) this.toolbar.activeTextarea.remove();
     const metrics = this.getTextPreviewMetrics(textElement);
     if (!metrics) {
-        console.error("LayerSystem: Impossible de trouver la position du texte pour l'édition.");
+        console.error("[Layer System] Unable to find text position for editing.");
         return;
     }
     const canvasRect = this.previewCanvas.getBoundingClientRect();
@@ -669,7 +633,7 @@ nodeType.prototype.showTextContextMenu = function(clientX, clientY, textElement)
         button.onmouseover = () => button.style.backgroundColor = '#555';
         button.onmouseout = () => button.style.backgroundColor = '#444';
         
-button.onclick = (e) => {
+        button.onclick = (e) => {
             menu.remove();
             const currentTextElement = this.toolbar.textElements.find(el => el.id === textElement.id);
             if (!currentTextElement) {
@@ -708,8 +672,6 @@ button.onclick = (e) => {
     setTimeout(() => document.addEventListener('mousedown', closeMenuHandler, true), 0);
 };
 nodeType.prototype.onCanvasMouseDown = function(e) {
-    console.log("---");
-    console.log("1. Clic détecté sur le canvas.");
     const mouseX = e.offsetX;
     const mouseY = e.offsetY;
     if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
@@ -717,12 +679,10 @@ nodeType.prototype.onCanvasMouseDown = function(e) {
         return;
     }
     if (this.toolbar.activeTool) {
-        console.log("2. Condition 'this.toolbar.activeTool' est VRAIE. Appel de handleCanvasClick...");
         this.toolbar.handleCanvasClick(e);
         return;
     }
     if (!this.movingLayer) {
-        console.log("-> Arrêt : Aucun outil actif et aucun calque en mouvement.");
         return;
     }
     const props = this.layer_properties[this.movingLayer];
@@ -1151,18 +1111,13 @@ nodeType.prototype.getHandleAtPos = function(e) {
             this.updateLayerWidgets();
             this.ensureWildcardInputs();
   
-            // ▼▼▼ AJOUTE CE BLOC DE CODE ICI ▼▼▼
             const connectedLayers = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null);
-            
-            // S'il n'y a qu'un seul calque connecté (donc, le premier)
             if (connectedLayers.length === 1) {
                 const layerName = connectedLayers[0].name;
-                // On s'assure que ses propriétés existent, puis on le force à être déplié.
                 if (this.layer_properties[layerName]) {
                     this.layer_properties[layerName].layer_collapsed = false;
                 }
             }
-            // ▲▲▲ FIN DE L'AJOUT ▲▲▲
   
             const activeLayers = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
             for (let i = 1; i <= MAX_LAYERS; i++) {
@@ -1183,19 +1138,14 @@ nodeType.prototype.getHandleAtPos = function(e) {
             }
         if (this.toolbar) {
           if (this.toolbar.activeTool === 'mask') {
-            // Si le mode masque est actif, on dit au MaskManager de se mettre à jour.
-            // Il va automatiquement trouver le nouveau calque déplié.
             this.toolbar.maskManager.show();
         } else {
-            // Sinon, on s'assure que ses outils sont bien cachés.
             this.toolbar.maskManager.hide();
         }
     }
             
 			this.updatePropertiesJSON();
             resizeHeight.call(this);
-			
-
         };
         
         nodeType.prototype.moveLayer = function(layer_index, direction) {
@@ -1223,20 +1173,15 @@ nodeType.prototype.getHandleAtPos = function(e) {
             const mask_img_A = this.loaded_preview_images[mask_name_A];
             this.loaded_preview_images[mask_name_A] = this.loaded_preview_images[mask_name_B]; this.loaded_preview_images[mask_name_B] = mask_img_A;
             
-            // ▼▼▼ LA CORRECTION COMPLÈTE EST ICI ▼▼▼
-            // On s'assure que this.preview_data existe avant de le manipuler.
             if (this.preview_data) {
-                // Échange des données du CALQUE
                 const layer_data_A = this.preview_data[name_A];
                 this.preview_data[name_A] = this.preview_data[name_B];
                 this.preview_data[name_B] = layer_data_A;
                 
-                // Échange des données du MASQUE associé
                 const mask_data_A = this.preview_data[mask_name_A];
                 this.preview_data[mask_name_A] = this.preview_data[mask_name_B];
                 this.preview_data[mask_name_B] = mask_data_A;
             }
-            // ▲▲▲ FIN DE LA CORRECTION ▲▲▲
 			
             if (input_A.link !== null) this.graph.links[input_A.link].target_slot = this.inputs.indexOf(input_A);
             if (input_B.link !== null) this.graph.links[input_B.link].target_slot = this.inputs.indexOf(input_B);
@@ -1253,7 +1198,7 @@ nodeType.prototype.getHandleAtPos = function(e) {
 nodeType.prototype.addLayerWidgets = function(layer_name) {
     if (!this.layer_properties[layer_name]) {
         this.layer_properties[layer_name] = {
-            blend_mode: "normal", opacity: 1.0, enabled: true, resize_mode: "fit", scale: 1.0, offset_x: 0, offset_y: 0,
+            blend_mode: "normal", opacity: 1.0, enabled: true, resize_mode: "crop", scale: 1.0, offset_x: 0, offset_y: 0,
             rotation: 0.0,
             brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0, 
             invert_mask: false, color_section_collapsed: true, layer_collapsed: true,
@@ -1327,7 +1272,6 @@ nodeType.prototype.handleDisconnectedInputs = function() {
     const inputs_to_remove = [];
     const props_to_remove = [];
 
-    // On trouve les entrées et propriétés à supprimer
     for (const key in this.layer_properties) {
         if (!connected_layer_names.has(key)) {
             props_to_remove.push(key);
@@ -1338,18 +1282,13 @@ nodeType.prototype.handleDisconnectedInputs = function() {
         }
     }
 
-    // On supprime les propriétés
     props_to_remove.forEach(key => delete this.layer_properties[key]);
-
-    // On supprime les entrées en partant de la fin pour ne pas perturber les index
     inputs_to_remove.sort((a,b) => this.inputs.indexOf(b) - this.inputs.indexOf(a)).forEach(i => this.removeInput(this.inputs.indexOf(i)));
     
-    // On ré-indexe les entrées et les propriétés restantes
     const final_props = {};
     const final_images = {};
     const final_data = {};
 
-    // On s'assure de conserver les images/données qui ne sont pas des calques (ex: base_image)
     for (const key in this.loaded_preview_images) {
         if (!key.startsWith("layer_") && !key.startsWith("mask_")) {
             final_images[key] = this.loaded_preview_images[key];
@@ -1363,23 +1302,19 @@ nodeType.prototype.handleDisconnectedInputs = function() {
         }
     }
     
-    // On prend la liste des calques restants, triée par leur position visuelle
     const remaining_layers = this.inputs.filter(i => i.name.startsWith("layer_"));
     remaining_layers.sort((a, b) => this.inputs.indexOf(a) - this.inputs.indexOf(b));
 
-    // On parcourt les calques restants pour tout ré-indexer proprement
     remaining_layers.forEach((input, i) => {
         const old_name = input.name;
         const new_name = `layer_${i + 1}`;
         const old_mask_name = old_name.replace("layer_", "mask_");
         const new_mask_name = new_name.replace("layer_", "mask_");
 
-        // 1. On déplace les PROPRIÉTÉS
         if (this.layer_properties[old_name]) {
             final_props[new_name] = this.layer_properties[old_name];
         }
         
-        // 2. On déplace les IMAGES PRÉCHARGÉES (calque ET masque)
         if (this.loaded_preview_images[old_name]) {
             final_images[new_name] = this.loaded_preview_images[old_name];
         }
@@ -1387,7 +1322,6 @@ nodeType.prototype.handleDisconnectedInputs = function() {
             final_images[new_mask_name] = this.loaded_preview_images[old_mask_name];
         }
 
-        // 3. On déplace les DONNÉES DE PREVIEW (calque ET masque)
         if (this.preview_data && this.preview_data[old_name]) {
             final_data[new_name] = this.preview_data[old_name];
         }
@@ -1395,7 +1329,6 @@ nodeType.prototype.handleDisconnectedInputs = function() {
             final_data[new_mask_name] = this.preview_data[old_mask_name];
         }
 
-        // 4. On renomme les entrées (inputs) du graphe
         input.name = new_name;
         const mask_input = this.inputs.find(m => m.name === old_mask_name);
         if (mask_input) {
@@ -1403,12 +1336,10 @@ nodeType.prototype.handleDisconnectedInputs = function() {
         }
     });
 
-    // 5. On assigne les objets fraîchement reconstruits et synchronisés
     this.layer_properties = final_props;
     this.loaded_preview_images = final_images;
     this.preview_data = final_data;
 	
-	    // ▼▼▼ LA LOGIQUE UX EST MAINTENANT ICI, À SA BONNE PLACE ▼▼▼
     const finalLayerNames = Object.keys(this.layer_properties);
     if (finalLayerNames.length > 0) {
         const isAnyLayerExpanded = finalLayerNames.some(name =>
@@ -1416,11 +1347,9 @@ nodeType.prototype.handleDisconnectedInputs = function() {
         );
 
         if (!isAnyLayerExpanded) {
-            // On déplie le premier calque de la nouvelle liste
             this.layer_properties[finalLayerNames[0]].layer_collapsed = false;
         }
     }
-    // --- FIN DE LA LOGIQUE UX ---
 };
         
         nodeType.prototype.ensureWildcardInputs = function () {
@@ -1436,7 +1365,6 @@ nodeType.prototype.handleDisconnectedInputs = function() {
         };
         
 nodeType.prototype.updatePropertiesJSON = function() {
-    // 1. Mise à jour du widget de données principal
     const mainDataWidget = this.widgets.find(w => w.name === "_layer_system_data" || w.name === "_properties_json");
     if (mainDataWidget) {
         const full_properties = {
@@ -1448,12 +1376,11 @@ nodeType.prototype.updatePropertiesJSON = function() {
         };
         mainDataWidget.value = JSON.stringify(full_properties);
     }
-    // 2. Neutralisation des widgets d'ancrage pour éviter les doublons
     this.widgets.forEach(widget => {
         if (widget.name.includes("_anchor")) {
             widget.value = null;
         }
     });
-};
-    },
+   };
+  },
 }); 
