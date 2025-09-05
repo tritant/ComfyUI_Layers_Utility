@@ -68,7 +68,7 @@ export class Toolbar {
         this.clickTimeout = null;
         this.tools = [
             { name: 'text', icon: textIconPath, y: 9 },
-            { name: 'mask', icon: '🎭', y: 45 } // Positionné en dessous du 'T'
+            { name: 'mask', icon: '🎭', y: 45 }
         ];
         this.toolBounds = {};
         this.selectedTextObject = null;
@@ -205,28 +205,23 @@ createContextualToolbar() {
                 size: iconSize 
             };
             ctx.save();
-            // On vérifie si l'icône est un chemin SVG ou un emoji (texte)
-            if (tool.icon instanceof Path2D) {
-                // Logique pour dessiner le chemin SVG
+             if (tool.icon instanceof Path2D) {
                 ctx.translate(iconX_start, iconY_start);
                 ctx.scale(iconSize / 24, iconSize / 24);
                 ctx.strokeStyle = (this.activeTool === tool.name) ? "#FFD700" : "#FFFFFF";
                 ctx.lineWidth = 2;
                 ctx.stroke(tool.icon);
             } else {
-                // Logique pour dessiner l'emoji
                 ctx.font = `${iconSize}px sans-serif`;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
-                // On ajoute un effet visuel si l'outil est actif
                 if (this.activeTool === tool.name) {
-                    ctx.fillStyle = "rgba(255, 221, 255, 0.6)"; // Surlignage jaune transparent
+                    ctx.fillStyle = "rgba(255, 221, 255, 0.6)";
                     const padding = 2;
                     ctx.fillRect(iconX_start - padding, iconY_start - padding, iconSize + (padding*2), iconSize + (padding*2));
                 }
                 
-                // On dessine l'emoji
                 ctx.fillText(tool.icon, iconX_start + iconSize / 2, iconY_start + iconSize / 2);
             }
             
@@ -273,24 +268,20 @@ createContextualToolbar() {
         if (clickedTool) {
             const toolName = clickedTool.name;
             const isCurrentlyActive = this.activeTool === toolName;
-            // On désactive l'outil actuel et on cache toutes les barres contextuelles
             this.activeTool = null;
-            this.hideContextualToolbar(); // Cache la barre du texte
-            this.maskManager.hide();     // Cache la barre du masque
-            // Si l'outil n'était pas actif, on l'active
+            this.hideContextualToolbar();
+            this.maskManager.hide();
             if (!isCurrentlyActive) {
                 this.activeTool = toolName;
             }
-            // On affiche la barre contextuelle correspondante si un outil est actif
             if (this.activeTool === 'mask') {
                 this.maskManager.show();
             }
-            // (La barre du texte est gérée par handleCanvasClick, donc pas de 'show' ici)
             if (this.activeTool && this.node.movingLayer) {
                 this.node.movingLayer = null;
             }
             
-            this.node.refreshUI(); // Met à jour l'affichage (couleur de l'icône, etc.)
+            this.node.refreshUI();
         }
     }
     handleCanvasClick(e) {
