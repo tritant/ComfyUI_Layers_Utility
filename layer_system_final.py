@@ -447,8 +447,8 @@ def process_remove_bg(filename, layer_index_str):
         session=session,
         alpha_matting=True,
         alpha_matting_foreground_threshold=240,
-        alpha_matting_background_threshold=445,
-        alpha_matting_erode_size=25
+        alpha_matting_background_threshold=10,
+        alpha_matting_erode_size=14
     )
 
     if image_with_alpha.mode != 'RGBA':
