@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-Layers-Utility"
 description = "This custom node for ComfyUI provides a powerful and flexible dynamic layering system, similar to what you would find in image editing software like Photoshop."
-version = "2.3.0"
+version = "2.5.2"
 license = { file = "LICENSE.txt" }
 
 [project.urls]
@@ -11,6 +11,9 @@ Repository = "https://github.com/tritant/ComfyUI_Layers_Utility"
 PublisherId = "tritant"
 DisplayName = "Layers System"
 Icon = ""
+
+
+
 
 
 
