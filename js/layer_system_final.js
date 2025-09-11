@@ -234,9 +234,11 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
                     p_widget.hidden = true;
                     p_widget.computeSize = () => [0, -4];
                 }
-                    if (!this.state_loaded_from_configure) {
-        this.refreshUI();
-    }
+ if (this.loadedConfig) {
+    this.loadStateFromConfig(this.loadedConfig);
+} else {
+    this.refreshUI();
+}
             }, 0);
         };
         
@@ -301,53 +303,42 @@ nodeType.prototype.onResize = function(size) {
     this._resizing = false;
 };
 
-nodeType.prototype.onConfigure = function (info) {
-    // Appel de la fonction originale de LiteGraph
+nodeType.prototype.onConfigure = function(info) {
     const onConfigureOriginal = nodeType.prototype.__proto__.onConfigure;
     onConfigureOriginal?.apply(this, arguments);
+    this.loadedConfig = info;
+};
 
-    // Vérifier si des valeurs de widgets ont été sauvegardées
+nodeType.prototype.loadStateFromConfig = function(info) {
+    if (this.stateLoaded) return;
     if (info.widgets_values) {
-        // 1. Trouver notre widget JSON par son nom, c'est plus fiable
         const jsonWidgetIndex = this.widgets.findIndex(w => w.name === "_properties_json");
-        
         if (jsonWidgetIndex > -1 && info.widgets_values[jsonWidgetIndex]) {
-            const jsonDataString = info.widgets_values[jsonWidgetIndex];
-            
             try {
-                // 2. Analyser le JSON
-                const props = JSON.parse(jsonDataString);
-                
-                // 3. Restaurer l'état interne du noeud
+                const props = JSON.parse(info.widgets_values[jsonWidgetIndex]);
                 this.base_image_properties = props.base || null;
                 this.layer_properties = props.layers || {};
-                
-                // Restaurer l'état de la barre d'outils (textes, etc.)
+                this.preview_data = props.preview_data || {};
                 if (this.toolbar) {
                     this.toolbar.textElements = props.texts || [];
                 } else {
-                    // Si la toolbar n'est pas encore prête, on stocke temporairement
                     this.loadedTextData = props.texts || [];
                 }
-                
-                console.log("[Layer System] Configuration rechargée avec succès.");
-this.state_loaded_from_configure = true;
+                this.stateLoaded = true;
+				app.queuePrompt();
+                if (Object.keys(this.preview_data).length > 0) {
+                   this.loadAndRedrawPreviews();
+                } else {
+                   this.refreshUI();
+                }
             } catch (e) {
-                console.error("[LayerSystem] Erreur lors de l'analyse du JSON de configuration", e);
+                console.error("[Layer System] Error loading JSON state", e);
+                this.refreshUI();
             }
         }
-    }
-    
-    // 4. Lancer une mise à jour de l'interface pour afficher l'état rechargé
-    // On utilise un setTimeout pour s'assurer que le reste du noeud est bien initialisé
-    setTimeout(() => {
-        // S'assurer que les données de texte sont bien chargées dans la toolbar
-        if (this.loadedTextData && this.toolbar) {
-            this.toolbar.textElements = this.loadedTextData;
-            delete this.loadedTextData;
-        }
+    } else {
         this.refreshUI();
-    }, 0);
+    }
 };
         
         const onConnectionsChange = nodeType.prototype.onConnectionsChange;
@@ -1166,7 +1157,7 @@ canvas.dataset.layerName = layerName;
     // (Cette partie est identique à la version précédente et correcte)
 
     // NOUVEAU : Icône Poubelle
-    const trashSize = 24;
+    const trashSize = 36;
     const trashX = moveIconX - trashSize - padding;
     const trashY = topPadding + (thumbSize - trashSize) / 2;
     props.trash_icon_bounds = { x: trashX, y: trashY, size: trashSize };
