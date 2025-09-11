@@ -239,7 +239,16 @@ class LayerSystem:
                         print(f"[Layer System] ERROR: Unable to load internal mask '{internal_mask_filename}': {e}")
                 else:
                     print(f"[Layer System] WARNING: Internal mask file not found: {image_path}")
-
+            if mask is not None:
+                mask_name = layer_name.replace("layer_", "mask_")
+                mask_preview_filename_temp = f"layersys_{mask_name}.png"
+                mask_pil_for_preview = tensor_to_pil(mask) # On ré-inverse pour l'affichage
+                mask_pil_for_preview.convert("RGB").save(os.path.join(temp_dir, mask_preview_filename_temp))
+        
+                previews_data[mask_name] = {
+                "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{mask_preview_filename_temp}",
+                "filename": internal_mask_filename 
+                }
             if not props.get("enabled", True): continue
 
             resize_mode = props.get("resize_mode", "fit")
