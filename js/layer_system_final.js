@@ -112,7 +112,14 @@ app.registerExtension({
             onNodeCreated?.apply(this, arguments);
 			this.base_image_properties = null;
             this.layer_properties = this.layer_properties || {};
-			
+const topSpacer = { 
+    name: "global_top_spacer", 
+    type: "CUSTOM_SPACER", 
+    draw: () => {}, 
+    computeSize: () => [0, 10] 
+};
+this.widgets.push(topSpacer);
+
 			this.addWidget(
               "button",
               "Add Image",
@@ -1455,7 +1462,8 @@ nodeType.prototype.updateLayerWidgets = function() {
     this.widgets = this.widgets.filter(w => 
         w.name.includes("_anchor") || 
         w.name === "_properties_json" ||
-        w.name === "Add Image" 
+        w.name === "Add Image" ||
+		w.name === "global_top_spacer"
     );
     
     // 2. On récupère la liste des calques actifs depuis notre état interne.
