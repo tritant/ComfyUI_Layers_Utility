@@ -33,6 +33,7 @@ const arrowUpPath = new Path2D("M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z")
 const arrowDownPath = new Path2D("M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z");
 const moveIconPath = new Path2D("M12 2 L12 22 M2 12 L22 12 M12 2 L8 6 M12 2 L16 6 M12 22 L8 18 M12 22 L16 18 M2 12 L6 8 M2 12 L6 16 M22 12 L18 8 M22 12 L18 16");
 const trashIconPath = new Path2D("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z");
+const replaceIconPath = new Path2D("M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z");
 
 app.registerExtension({
     name: "LayerSystem.DynamicLayers",
@@ -949,9 +950,21 @@ nodeType.prototype.initializeHeaderCanvases = function() {
             const layerName = e.currentTarget.dataset.layerName;
 
             // Si c'est le calque de base ou un header vide, on ne fait rien
-            if (!layerName || layerName === 'base_image') {
+            if (!layerName) {
                 return;
             }
+
+    // --- NOUVELLE LOGIQUE POUR LE CLIC SUR LE HEADER DE BASE ---
+    if (layerName === 'base_image') {
+        const bounds = this.base_image_properties?.replace_icon_bounds;
+        if (bounds && e.offsetX >= bounds.x && e.offsetX <= bounds.x + bounds.size &&
+            e.offsetY >= bounds.y && e.offsetY <= bounds.y + bounds.size) {
+            // Si on a cliqué sur l'icône, on lance le remplacement
+            this.handleBaseImageReplace();
+        }
+        // On ne fait rien pour les autres clics sur la base
+        return;
+    }
 
             const props = this.layer_properties[layerName];
             if (!props) return;
@@ -1116,6 +1129,25 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
 
         // ▼▼▼ MODIFICATION 2 : On retire le paramètre 'maxWidth' par sécurité ▼▼▼
         ctx.fillText(`▶ Base Image`, 5, textY);
+    // --- DESSIN DE L'ICÔNE REMPLACER ---
+    const replaceIconSize = 36;
+    // On la positionne à gauche de la miniature
+    const replaceIconX = thumbX - replaceIconSize - padding;
+    const replaceIconY = topPadding + (thumbSize - replaceIconSize) / 2;
+
+    // On sauvegarde sa position pour le clic
+    if (this.base_image_properties) {
+        this.base_image_properties.replace_icon_bounds = { x: replaceIconX, y: replaceIconY, size: replaceIconSize };
+    }
+
+    ctx.save();
+    ctx.translate(replaceIconX, replaceIconY);
+    ctx.scale(replaceIconSize / 24, replaceIconSize / 24);
+    ctx.strokeStyle = "#CCCCCC"; // Couleur neutre
+    ctx.lineWidth = 2;
+    ctx.stroke(replaceIconPath);
+    ctx.restore();
+    // --- FIN DU DESSIN DE L'ICÔNE ---
 
         // Le reste de votre code est parfait
         ctx.fillStyle = "#353535";
@@ -1233,6 +1265,39 @@ canvas.dataset.layerName = layerName;
     ctx.restore();
 
 	};
+	
+	nodeType.prototype.handleBaseImageReplace = function() {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/jpeg,image/png,image/webp';
+    fileInput.style.display = 'none';
+
+    fileInput.onchange = async (e) => {
+        if (!e.target.files.length) { document.body.removeChild(fileInput); return; }
+        const file = e.target.files[0];
+        try {
+            const formData = new FormData();
+            formData.append('image', file);
+            formData.append('overwrite', 'true');
+            formData.append('type', 'input');
+            const response = await fetch('/upload/image', { method: 'POST', body: formData });
+            const data = await response.json();
+            
+            // On écrase les anciennes propriétés de la base avec les nouvelles
+            this.base_image_properties = { filename: data.name, details: data };
+
+            this.updatePropertiesJSON();
+            app.queuePrompt(); // On lance un rendu pour tout mettre à jour
+
+        } catch (error) {
+            console.error("[Layer System] Error replacing base image:", error);
+        } finally {
+            document.body.removeChild(fileInput);
+        }
+    };
+    document.body.appendChild(fileInput);
+    fileInput.click();
+};
         
         nodeType.prototype.updateLayerVisibility = function(layerName) {
             const props = this.layer_properties[layerName];
