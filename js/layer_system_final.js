@@ -1,6 +1,5 @@
 import { app } from "/scripts/app.js";
 import { Toolbar } from './toolbar.js';
-
 function applyMask(layerImage, maskImage) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -18,7 +17,6 @@ function applyMask(layerImage, maskImage) {
     ctx.putImageData(layerData, 0, 0);
     return canvas;
 }
-
 const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "soft-light", "hard-light", "difference", "color-dodge", "color-burn"];
 const RESIZE_MODES = ["stretch", "fit", "cover", "crop"];
 const MAX_LAYERS = 11;
@@ -34,7 +32,6 @@ const arrowDownPath = new Path2D("M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"
 const moveIconPath = new Path2D("M12 2 L12 22 M2 12 L22 12 M12 2 L8 6 M12 2 L16 6 M12 22 L8 18 M12 22 L16 18 M2 12 L6 8 M2 12 L6 16 M22 12 L18 8 M22 12 L18 16");
 const trashIconPath = new Path2D("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z");
 const replaceIconPath = new Path2D("M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z");
-
 app.registerExtension({
     name: "LayerSystem.DynamicLayers",
     
@@ -90,13 +87,13 @@ app.registerExtension({
                         this.basePreviewImage = this.loaded_preview_images.base_image;
                         resizeHeight.call(this);
                         this.redrawPreviewCanvas();
-						this.refreshUI();
+                        this.refreshUI();
                     })
                     .catch(e => console.error("[Layer System] At least one preview image could not be loaded.", e));
             }
         };
-		
-		const onDrawBackground = nodeType.prototype.onDrawBackground;
+        
+        const onDrawBackground = nodeType.prototype.onDrawBackground;
         nodeType.prototype.onDrawBackground = function(ctx) {
         onDrawBackground?.apply(this, arguments);
         if (this.toolbar) {
@@ -111,7 +108,7 @@ app.registerExtension({
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
-			this.base_image_properties = null;
+            this.base_image_properties = null;
             this.layer_properties = this.layer_properties || {};
 const topSpacer = { 
     name: "global_top_spacer", 
@@ -120,14 +117,13 @@ const topSpacer = {
     computeSize: () => [0, 10] 
 };
 this.widgets.push(topSpacer);
-
-			this.addWidget(
+            this.addWidget(
               "button",
               "Add Image",
                null,
                () => { this.handleInternalImageLoad(); }
             );
-			
+            
             this.basePreviewImage = null;
             this.preview_data = {};
             this.loaded_preview_images = {};
@@ -154,7 +150,7 @@ this.widgets.push(topSpacer);
             this.rotationOffsetAngle = 0.0;
             
             this.toolbar = new Toolbar(this);
-			this.size[0] = 800;
+            this.size[0] = 800;
             
             setTimeout(() => {
                 const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
@@ -246,7 +242,6 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
 nodeType.prototype.onResize = function(size) {
     if (this._resizing) return;
     this._resizing = true;
-
     if (!this.widgets || !this.size || !this.basePreviewImage || this.basePreviewImage.naturalWidth <= 0) {
         this._resizing = false;
         return;
@@ -264,11 +259,9 @@ nodeType.prototype.onResize = function(size) {
     
     const newComputedSize = this.computeSize();
     this.size[1] = newComputedSize[1];
-
     if (anchorWidget?.computeSize) {
         delete anchorWidget.computeSize;
     }
-
     // Le redessin du canvas est aussi correct
     if (this.previewCanvas) {
         if (this.redraw_req) cancelAnimationFrame(this.redraw_req);
@@ -277,7 +270,6 @@ nodeType.prototype.onResize = function(size) {
             this.redraw_req = null;
         });
     }
-
     // ▼▼▼ LA CORRECTION EST ICI ▼▼▼
     // On redessine les headers en utilisant la bonne logique.
     
@@ -288,7 +280,6 @@ nodeType.prototype.onResize = function(size) {
             this.drawHeaderCanvas(baseHeaderAnchor.canvas, 'base_image');
         }
     }
-
     // 2. On redessine les headers des calques actifs
     const activeLayerKeys = Object.keys(this.layer_properties);
     for (const layerName of activeLayerKeys) {
@@ -303,13 +294,11 @@ nodeType.prototype.onResize = function(size) {
     
     this._resizing = false;
 };
-
 nodeType.prototype.onConfigure = function(info) {
     const onConfigureOriginal = nodeType.prototype.__proto__.onConfigure;
     onConfigureOriginal?.apply(this, arguments);
     this.loadedConfig = info;
 };
-
 nodeType.prototype.loadStateFromConfig = function(info) {
     if (this.stateLoaded) return;
     if (info.widgets_values) {
@@ -326,7 +315,7 @@ nodeType.prototype.loadStateFromConfig = function(info) {
                     this.loadedTextData = props.texts || [];
                 }
                 this.stateLoaded = true;
-				app.queuePrompt();
+                app.queuePrompt();
                 if (Object.keys(this.preview_data).length > 0) {
                    this.loadAndRedrawPreviews();
                 } else {
@@ -347,7 +336,7 @@ nodeType.prototype.loadStateFromConfig = function(info) {
             onConnectionsChange?.apply(this, arguments);
             if (side === 1) { setTimeout(() => this.refreshUI(), 0); }
         };
-		
+        
         nodeType.prototype.redrawPreviewCanvas = function() {
             if (!this.previewCanvas || !this.size || !this.basePreviewImage || !this.basePreviewImage.naturalWidth) {
                 if(this.previewCtx) this.previewCtx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
@@ -935,7 +924,6 @@ nodeType.prototype.initializeHeaderCanvases = function() {
     for (let i = 1; i <= MAX_LAYERS; i++) {
         const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
         if (!anchor || !anchor.inputEl || anchor.canvas) continue;
-
         const canvas = document.createElement("canvas");
         anchor.canvas = canvas;
         console.log(`Canvas créé pour ancre N°${i}:`, canvas);
@@ -948,12 +936,10 @@ nodeType.prototype.initializeHeaderCanvases = function() {
         canvas.addEventListener("mousedown", (e) => {
             // On récupère directement le nom du calque depuis le canvas cliqué !
             const layerName = e.currentTarget.dataset.layerName;
-
             // Si c'est le calque de base ou un header vide, on ne fait rien
             if (!layerName) {
                 return;
             }
-
     // --- NOUVELLE LOGIQUE POUR LE CLIC SUR LE HEADER DE BASE ---
     if (layerName === 'base_image') {
         const bounds = this.base_image_properties?.replace_icon_bounds;
@@ -965,14 +951,12 @@ nodeType.prototype.initializeHeaderCanvases = function() {
         // On ne fait rien pour les autres clics sur la base
         return;
     }
-
             const props = this.layer_properties[layerName];
             if (!props) return;
             
             const layer_index = parseInt(layerName.split("_")[1]);
             const x = e.offsetX;
             const y = e.offsetY;
-
             // La logique de clic pour la poubelle (et les autres icônes)
             // reste exactement la même, mais elle est maintenant 100% fiable.
             if (props.trash_icon_bounds) {
@@ -1054,8 +1038,8 @@ nodeType.prototype.initializeHeaderCanvases = function() {
                         }
                         
                         this.refreshUI();
-						    /*setTimeout(() => {
-								
+                            /*setTimeout(() => {
+                                
         this.setDirtyCanvas(true, true);
     }, 300);*/
                     }
@@ -1064,9 +1048,7 @@ nodeType.prototype.initializeHeaderCanvases = function() {
             }
         };
 nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
-
     if (!canvas) return;
-
     // --- SETUP INITIAL DU CANVAS ---
     const ctx = canvas.getContext("2d");
     const widgetWidth = this.size[0] - 20;
@@ -1079,14 +1061,11 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(ratio, ratio);
     ctx.clearRect(0, 0, widgetWidth, allocatedHeight);
-
     // --- DESSIN DU CADRE ---
     ctx.strokeStyle = "#555555";
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, widgetWidth - 2, allocatedHeight - 10);
-
     const isBaseLayer = layerName === 'base_image';
-
     // --- CORRECTION CLÉ : Utiliser la bonne clé pour trouver l'image ---
     let layerImage = null;
     if (this.loaded_preview_images) {
@@ -1095,7 +1074,6 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
         layerImage = this.loaded_preview_images[imageKey];
     }
     // --- FIN DE LA CORRECTION ---
-
     // --- Définition des positions (INCHANGÉES) ---
     const topPadding = 4;
     const padding = 8;
@@ -1126,7 +1104,6 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.font = "14px Arial";
-
         // ▼▼▼ MODIFICATION 2 : On retire le paramètre 'maxWidth' par sécurité ▼▼▼
         ctx.fillText(`▶ Base Image`, 5, textY);
     // --- DESSIN DE L'ICÔNE REMPLACER ---
@@ -1134,12 +1111,10 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
     // On la positionne à gauche de la miniature
     const replaceIconX = thumbX - replaceIconSize - padding;
     const replaceIconY = topPadding + (thumbSize - replaceIconSize) / 2;
-
     // On sauvegarde sa position pour le clic
     if (this.base_image_properties) {
         this.base_image_properties.replace_icon_bounds = { x: replaceIconX, y: replaceIconY, size: replaceIconSize };
     }
-
     ctx.save();
     ctx.translate(replaceIconX, replaceIconY);
     ctx.scale(replaceIconSize / 24, replaceIconSize / 24);
@@ -1148,7 +1123,6 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
     ctx.stroke(replaceIconPath);
     ctx.restore();
     // --- FIN DU DESSIN DE L'ICÔNE ---
-
         // Le reste de votre code est parfait
         ctx.fillStyle = "#353535";
         ctx.fillRect(thumbX, thumbY, thumbSize, thumbSize);
@@ -1161,12 +1135,9 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
             destY = thumbY + (thumbSize - destHeight) / 2;
             ctx.drawImage(layerImage, 0, 0, layerImage.naturalWidth, layerImage.naturalHeight, destX, destY, destWidth, destHeight);
         }
-				
+                
         return; 
-
     }
-
-
     // ==========================================================
     // CAS 2 : C'est un calque normal (header complet)
     // ==========================================================
@@ -1184,10 +1155,8 @@ canvas.dataset.layerName = layerName;
     const triangle = props.layer_collapsed ? "▶" : "▼";
     const textMaxWidth = moveIconX - (padding * 3) - 24;
     ctx.fillText(`${triangle} Layer ${layer_index}`, 5, textY, textMaxWidth);
-
     // --- DESSIN DES ICÔNES ---
     // (Cette partie est identique à la version précédente et correcte)
-
     // NOUVEAU : Icône Poubelle
     const trashSize = 36;
     const trashX = moveIconX - trashSize - padding;
@@ -1211,7 +1180,6 @@ canvas.dataset.layerName = layerName;
     ctx.lineWidth = 2;
     ctx.stroke(moveIconPath);
     ctx.restore();
-
     // Flèches de déplacement
     const isFirst = layer_index <= 1;
     const isLast = layer_index >= total_layers;
@@ -1229,7 +1197,6 @@ canvas.dataset.layerName = layerName;
     ctx.lineWidth = 3;
     ctx.stroke(arrowDownPath);
     ctx.restore();
-
     // Cadenas
     const lockY = topPadding + (thumbSize - lockSize) / 2;
     ctx.save();
@@ -1239,7 +1206,6 @@ canvas.dataset.layerName = layerName;
     ctx.lineWidth = 2;
     ctx.stroke(this.accordionMode ? lockIconPath : unlockIconPath);
     ctx.restore();
-
     // Miniature
     ctx.fillStyle = "#353535";
     ctx.fillRect(thumbX, thumbY, thumbSize, thumbSize);
@@ -1263,32 +1229,36 @@ canvas.dataset.layerName = layerName;
     ctx.stroke(eyeIconPath);
     if (!props.enabled) { ctx.stroke(eyeSlashPath); }
     ctx.restore();
-
-	};
-	
-	nodeType.prototype.handleBaseImageReplace = function() {
+    };
+    
+nodeType.prototype.handleBaseImageReplace = function() {
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = 'image/jpeg,image/png,image/webp';
     fileInput.style.display = 'none';
-
     fileInput.onchange = async (e) => {
-        if (!e.target.files.length) { document.body.removeChild(fileInput); return; }
-        const file = e.target.files[0];
+        if (!e.target.files.length) { 
+            document.body.removeChild(fileInput); 
+            return; 
+        }
+        const originalFile = e.target.files[0];
         try {
+            const staticFilename = "layersystem_base.png";
+            // On crée un nouveau Fichier en mémoire avec le nom statique
+            const newFile = new File([originalFile], staticFilename, { type: originalFile.type });
             const formData = new FormData();
-            formData.append('image', file);
+            formData.append('image', newFile);
             formData.append('overwrite', 'true');
             formData.append('type', 'input');
+            //formData.append('subfolder', 'LayerSystem');
+            
             const response = await fetch('/upload/image', { method: 'POST', body: formData });
             const data = await response.json();
             
             // On écrase les anciennes propriétés de la base avec les nouvelles
             this.base_image_properties = { filename: data.name, details: data };
-
             this.updatePropertiesJSON();
-            app.queuePrompt(); // On lance un rendu pour tout mettre à jour
-
+            app.queuePrompt();
         } catch (error) {
             console.error("[Layer System] Error replacing base image:", error);
         } finally {
@@ -1333,7 +1303,6 @@ canvas.dataset.layerName = layerName;
 nodeType.prototype.refreshUI = function() {
     // S'assure que les widgets (sliders, etc.) correspondent à l'état des calques
     this.updateLayerWidgets();
-
     const activeLayerKeys = Object.keys(this.layer_properties);
     const activeLayers = new Set(activeLayerKeys);
     
@@ -1352,14 +1321,12 @@ nodeType.prototype.refreshUI = function() {
             baseAnchor.computeSize = () => [0, -4];
         }
     }
-
     // --- GESTION DES CALQUES NORMAUX (commence à la 2ème ancre) ---
     for (let i = 2; i <= MAX_LAYERS; i++) {
         // L'ancre N°2 correspond au calque N°1, etc.
         const layerName = `layer_${i - 1}`;
         const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
         if (!anchor) continue;
-
         if (activeLayers.has(layerName)) {
             anchor.hidden = false;
             anchor.computeSize = (width) => [width, 64];
@@ -1372,7 +1339,6 @@ nodeType.prototype.refreshUI = function() {
             anchor.computeSize = () => [0, -4];
         }
     }
-
     // --- Votre logique pour déplier le premier calque ---
     // (Adaptée pour ne s'appliquer que s'il n'y a pas de calque de base)
     if (!this.base_image_properties && activeLayerKeys.length === 1) {
@@ -1381,10 +1347,8 @@ nodeType.prototype.refreshUI = function() {
             this.layer_properties[layerName].layer_collapsed = false;
             // On redemande une mise à jour de la visibilité pour ce calque
             this.updateLayerVisibility(layerName);
-
         }
     }
-
     // --- Le reste de votre fonction, inchangé ---
     if (this.toolbar) {
         if (this.toolbar.activeTool === 'mask') {
@@ -1413,27 +1377,22 @@ nodeType.prototype.moveLayer = function(layer_index, direction) {
             // ▲▲▲ FIN DE L'AJOUT ▲▲▲
         };
     });
-
     // 2. Trouver l'index du calque à déplacer
     const fromIndex = layers_array.findIndex(l => l.name === `layer_${layer_index}`);
     if (fromIndex === -1) return;
-
     // 3. Calculer la nouvelle position et effectuer l'échange
     const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
     const element = layers_array.splice(fromIndex, 1)[0];
     layers_array.splice(toIndex, 0, element);
-
     // 4. Vider les anciens objets et les reconstruire dans le bon ordre
     this.layer_properties = {};
     const old_loaded_preview_images = this.loaded_preview_images || {};
     const old_preview_data = this.preview_data || {};
     this.loaded_preview_images = { base_image: old_loaded_preview_images['base_image'] };
     this.preview_data = { base_image: old_preview_data['base_image'] };
-
     layers_array.forEach((layer, index) => {
         const newLayerName = `layer_${index + 1}`;
         const newMaskName = `mask_${index + 1}`;
-
         this.layer_properties[newLayerName] = layer.props;
         if (layer.preview_img) this.loaded_preview_images[newLayerName] = layer.preview_img;
         if (layer.preview_data) this.preview_data[newLayerName] = layer.preview_data;
@@ -1442,18 +1401,15 @@ nodeType.prototype.moveLayer = function(layer_index, direction) {
         if (layer.mask_img) this.loaded_preview_images[newMaskName] = layer.mask_img;
         if (layer.mask_data) this.preview_data[newMaskName] = layer.mask_data;
         // ▲▲▲ FIN DE L'AJOUT ▲▲▲
-
         if (this.movingLayer === layer.name) {
             this.movingLayer = newLayerName;
         }
     });
-
     // 5. Rafraîchir l'interface
     this.updatePropertiesJSON();
     this.refreshUI();
     this.redrawPreviewCanvas();
 };
-
 nodeType.prototype.addLayerWidgets = function(layer_name) {
     if (!this.layer_properties[layer_name]) {
         this.layer_properties[layer_name] = {
@@ -1461,7 +1417,7 @@ nodeType.prototype.addLayerWidgets = function(layer_name) {
             rotation: 0.0,
             brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0, 
             invert_mask: false, color_section_collapsed: true, layer_collapsed: true,
-			internal_mask_filename: null,
+            internal_mask_filename: null,
             internal_mask_details: null,
         };
     }
@@ -1519,7 +1475,7 @@ nodeType.prototype.updateLayerWidgets = function() {
         w.name.includes("_anchor") || 
         w.name === "_properties_json" ||
         w.name === "Add Image" ||
-		w.name === "global_top_spacer"
+        w.name === "global_top_spacer"
     );
     
     // 2. On récupère la liste des calques actifs depuis notre état interne.
@@ -1535,12 +1491,10 @@ nodeType.prototype.updateLayerWidgets = function() {
         this.addLayerWidgets(layerName);
     }
 };
-
 nodeType.prototype.handleDisconnectedInputs = function() {
     const connected_layer_names = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
     const inputs_to_remove = [];
     const props_to_remove = [];
-
     for (const key in this.layer_properties) {
         if (!connected_layer_names.has(key)) {
             props_to_remove.push(key);
@@ -1550,14 +1504,12 @@ nodeType.prototype.handleDisconnectedInputs = function() {
             if(mask_input) inputs_to_remove.push(mask_input);
         }
     }
-
     props_to_remove.forEach(key => delete this.layer_properties[key]);
     inputs_to_remove.sort((a,b) => this.inputs.indexOf(b) - this.inputs.indexOf(a)).forEach(i => this.removeInput(this.inputs.indexOf(i)));
     
     const final_props = {};
     const final_images = {};
     const final_data = {};
-
     for (const key in this.loaded_preview_images) {
         if (!key.startsWith("layer_") && !key.startsWith("mask_")) {
             final_images[key] = this.loaded_preview_images[key];
@@ -1573,13 +1525,11 @@ nodeType.prototype.handleDisconnectedInputs = function() {
     
     const remaining_layers = this.inputs.filter(i => i.name.startsWith("layer_"));
     remaining_layers.sort((a, b) => this.inputs.indexOf(a) - this.inputs.indexOf(b));
-
     remaining_layers.forEach((input, i) => {
         const old_name = input.name;
         const new_name = `layer_${i + 1}`;
         const old_mask_name = old_name.replace("layer_", "mask_");
         const new_mask_name = new_name.replace("layer_", "mask_");
-
         if (this.layer_properties[old_name]) {
             final_props[new_name] = this.layer_properties[old_name];
         }
@@ -1590,31 +1540,27 @@ nodeType.prototype.handleDisconnectedInputs = function() {
         if (this.loaded_preview_images[old_mask_name]) {
             final_images[new_mask_name] = this.loaded_preview_images[old_mask_name];
         }
-
         if (this.preview_data && this.preview_data[old_name]) {
             final_data[new_name] = this.preview_data[old_name];
         }
         if (this.preview_data && this.preview_data[old_mask_name]) {
             final_data[new_mask_name] = this.preview_data[old_mask_name];
         }
-
         input.name = new_name;
         const mask_input = this.inputs.find(m => m.name === old_mask_name);
         if (mask_input) {
             mask_input.name = new_mask_name;
         }
     });
-
     this.layer_properties = final_props;
     this.loaded_preview_images = final_images;
     this.preview_data = final_data;
-	
+    
     const finalLayerNames = Object.keys(this.layer_properties);
     if (finalLayerNames.length > 0) {
         const isAnyLayerExpanded = finalLayerNames.some(name =>
             !this.layer_properties[name].layer_collapsed
         );
-
         if (!isAnyLayerExpanded) {
             this.layer_properties[finalLayerNames[0]].layer_collapsed = false;
         }
@@ -1634,92 +1580,159 @@ nodeType.prototype.handleDisconnectedInputs = function() {
         };
  
 nodeType.prototype.handleInternalImageLoad = function() {
+    if (Object.keys(this.layer_properties).length >= MAX_LAYERS) {
+        alert(`Maximum number of layers (${MAX_LAYERS}) reached.`);
+        return;
+    }
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = 'image/jpeg,image/png,image/webp';
     fileInput.style.display = 'none';
 
     fileInput.onchange = async (e) => {
-        if (!e.target.files.length) return;
-        const file = e.target.files[0];
+        if (!e.target.files.length) { document.body.removeChild(fileInput); return; }
+        const originalFile = e.target.files[0];
 
-        const formData = new FormData();
-        formData.append('image', file);
-        formData.append('overwrite', 'true');
-        formData.append('type', 'input');
-
-        this.title = "Uploading..."; // Feedback pour l'utilisateur
-        
         try {
+            // ▼▼▼ ON RESTAURE LA LOGIQUE BASE vs CALQUE ▼▼▼
+            let staticFilename;
+            const isBaseImage = !this.base_image_properties;
+
+            if (isBaseImage) {
+                staticFilename = "layersystem_base.png";
+            } else {
+                const timestamp = Date.now();
+                staticFilename = `layersystem_${timestamp}.png`;
+            }
+
+            const newFile = new File([originalFile], staticFilename, { type: originalFile.type });
+            const formData = new FormData();
+            formData.append('image', newFile);
+            formData.append('overwrite', 'true');
+            formData.append('type', 'input');
+
             const response = await fetch('/upload/image', { method: 'POST', body: formData });
             const data = await response.json();
 
-            if (!this.base_image_properties) {
+            if (isBaseImage) {
+                // C'est l'image de base, on la met dans la bonne variable
                 this.base_image_properties = { filename: data.name, details: data };
             } else {
-				if (this.accordionMode) {
-    // Si le mode accordéon est actif, on replie tous les autres calques d'abord
-    for (const key in this.layer_properties) {
-        this.layer_properties[key].layer_collapsed = true;
-    }
-}
-                const newIndex = Object.keys(this.layer_properties).length + 1;
+                // C'est un calque normal
+                const existingIndices = new Set(Object.keys(this.layer_properties).map(k => parseInt(k.split('_')[1])));
+                let newIndex = 1;
+                while (existingIndices.has(newIndex)) { newIndex++; }
                 const layerName = `layer_${newIndex}`;
+
+                if (this.accordionMode) {
+                    for (const key in this.layer_properties) {
+                        this.layer_properties[key].layer_collapsed = true;
+                    }
+                }
                 this.layer_properties[layerName] = {
                     source_filename: data.name,
                     source_details: data,
                     blend_mode: "normal", opacity: 1.0, enabled: true, resize_mode: "crop", scale: 1.0, offset_x: 0, offset_y: 0,
-                    rotation: 0.0,
-                    brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0, 
+                    rotation: 0.0, brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0,
                     invert_mask: false, color_section_collapsed: true, layer_collapsed: false,
                 };
             }
-
-            this.title = "Layer System";
-			this.updateLayerWidgets();
+            
             this.updatePropertiesJSON();
-            app.queuePrompt(); // Lance l'exécution pour mettre à jour la preview
-/*setTimeout(() => {
-    this.setDirtyCanvas(true, true);
-}, 300);*/
+            this.refreshUI();
+            
+            // On garde le setTimeout pour éviter les bugs de timing au lancement
+            setTimeout(() => {
+                app.queuePrompt();
+            }, 0);
+
         } catch (error) {
             console.error("Error uploading file:", error);
-            this.title = "Upload Failed!";
         } finally {
             document.body.removeChild(fileInput);
         }
     };
-
     document.body.appendChild(fileInput);
     fileInput.click();
 };
 
 nodeType.prototype.deleteLayer = function(layerNameToDelete) {
-    // Supprimer le calque
-    delete this.layer_properties[layerNameToDelete];
+    if (this.movingLayer === layerNameToDelete) {
+        this.movingLayer = null;
+    }
 
-    // Recréer les propriétés en ré-indexant
-    const old_properties = this.layer_properties;
-    this.layer_properties = {};
-    const sortedKeys = Object.keys(old_properties).sort((a, b) => parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+    // --- Suppression du fichier unique sur le serveur ---
+    const layerToDeleteProps = this.layer_properties[layerNameToDelete];
+    if (layerToDeleteProps && layerToDeleteProps.source_details) {
+        const fileDetails = layerToDeleteProps.source_details;
+        const deleteFileOnServer = async (details) => {
+            try {
+                if (!details || !details.name) return;
+                await fetch("/layersystem/delete_file", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename: details.name, subfolder: details.subfolder }),
+                });
+            } catch (e) { console.error("Failed to delete file:", e); }
+        };
+        deleteFileOnServer(fileDetails);
+        if (layerToDeleteProps.internal_mask_details) deleteFileOnServer(layerToDeleteProps.internal_mask_details);
+        if (layerToDeleteProps.internal_preview_mask_details) deleteFileOnServer(layerToDeleteProps.internal_preview_mask_details);
+    }
     
-    sortedKeys.forEach((key, index) => {
-        const newName = `layer_${index + 1}`;
-        this.layer_properties[newName] = old_properties[key];
-    });
+    // --- Reconstruction propre de l'état ---
+    const layersToKeep = [];
+    const sortedKeys = Object.keys(this.layer_properties).sort((a, b) => parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+    
+    for (const name of sortedKeys) {
+        if (name !== layerNameToDelete) {
+            const maskName = name.replace('layer_', 'mask_');
+            layersToKeep.push({
+                props: JSON.parse(JSON.stringify(this.layer_properties[name])),
+                preview_img: this.loaded_preview_images[name],
+                preview_data: this.preview_data[name] ? JSON.parse(JSON.stringify(this.preview_data[name])) : undefined,
+                mask_img: this.loaded_preview_images[maskName],
+                mask_data: this.preview_data[maskName] ? JSON.parse(JSON.stringify(this.preview_data[maskName])) : undefined,
+            });
+        }
+    }
 
-    // Mettre à jour l'UI
-	this.updateLayerWidgets();
+    const new_layer_properties = {};
+    const new_loaded_preview_images = { base_image: this.loaded_preview_images.base_image };
+    const new_preview_data = { base_image: this.preview_data.base_image };
+
+    layersToKeep.forEach((layer, index) => {
+        const newLayerName = `layer_${index + 1}`;
+        const newMaskName = `mask_${index + 1}`;
+        new_layer_properties[newLayerName] = layer.props;
+        if (layer.preview_img) new_loaded_preview_images[newLayerName] = layer.preview_img;
+        if (layer.preview_data) new_preview_data[newLayerName] = layer.preview_data;
+        if (layer.mask_img) new_loaded_preview_images[newMaskName] = layer.mask_img;
+        if (layer.mask_data) new_preview_data[newMaskName] = layer.mask_data;
+    });
+    
+    this.layer_properties = new_layer_properties;
+    this.loaded_preview_images = new_loaded_preview_images;
+    this.preview_data = new_preview_data;
+
     this.updatePropertiesJSON();
-    this.refreshUI(); // refreshUI va cacher l'ancre et les widgets devenus inutiles
+    this.refreshUI();
     this.redrawPreviewCanvas();
+    //if(this.commitStateChange) this.commitStateChange(); else app.queuePrompt();
+};
+ 
+ nodeType.prototype.logFullState = function(label) {
+    console.log(`\n\n--- DEBUG STATE: ${label} ---`);
+    console.log("PROPRIÉTÉS DES CALQUES:", JSON.parse(JSON.stringify(this.layer_properties)));
+    console.log("DONNÉES DE PREVIEW:", this.preview_data);
+    console.log("--- FIN DEBUG STATE ---\n\n");
 };
  
 nodeType.prototype.updatePropertiesJSON = function() {
     const mainDataWidget = this.widgets.find(w => w.name === "_layer_system_data" || w.name === "_properties_json");
     if (mainDataWidget) {
         const full_properties = {
-			base: this.base_image_properties,
+            base: this.base_image_properties,
             layers: this.layer_properties,
             texts: this.toolbar ? this.toolbar.getTexts() : [],
             preview_width: this.previewCanvas ? this.previewCanvas.width : 512,
@@ -1735,4 +1748,4 @@ nodeType.prototype.updatePropertiesJSON = function() {
     });
    };
   },
-}); 
+});  
