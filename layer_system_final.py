@@ -12,6 +12,7 @@ import http.server
 import socketserver
 import threading
 import math
+import glob
 from rembg import remove, new_session
 
 # --- Configuration et chargement du modèle Rembg ---
@@ -161,6 +162,7 @@ class LayerSystem:
         return top
 
     def composite_layers(self, _properties_json="{}", **kwargs):
+        print(f"[Layer System DEBUG] JSON reçu par Python: {_properties_json}")
         start_preview_server()
 
         try:
@@ -428,6 +430,37 @@ class LayerSystem:
             pil_image.alpha_composite(text_canvas)
             
             final_image = pil_to_tensor(pil_image)
+        try:
+            active_files = set()
+    # Ajoute le fichier de base s'il existe
+            if base_props.get("source_filename"):
+                active_files.add(base_props["source_filename"])
+            elif base_props.get("filename"): # Compatibilité avec l'ancien format
+                active_files.add(base_props["filename"])
+    
+    # Ajoute tous les fichiers des calques et de leurs masques
+            for layer_name, props in layers_properties.items():
+                if props.get("source_filename"):
+                    active_files.add(props["source_filename"])
+                if props.get("internal_mask_filename"):
+                    active_files.add(props["internal_mask_filename"])
+        # compatibilité avec les anciens masques removebg
+                if props.get("internal_preview_mask_details"):
+                     active_files.add(props["internal_preview_mask_details"]["name"])
+
+
+            input_dir = folder_paths.get_input_directory()
+    # Trouve tous les fichiers créés par le LayerSystem sur le disque
+            disk_files = glob.glob(os.path.join(input_dir, "layersystem_*.png"))
+    
+            for file_path in disk_files:
+                filename = os.path.basename(file_path)
+                if filename not in active_files:
+                    print(f"[Layer System] Nettoyage : suppression du fichier orphelin {filename}")
+                    os.remove(file_path)
+
+        except Exception as e:
+            print(f"[Layer System] ERREUR pendant le nettoyage automatique : {e}")            
 
         return {
             "result": (final_image,),
@@ -490,6 +523,35 @@ def process_remove_bg(filename, layer_index_str):
         "preview_mask_details": { "name": preview_mask_filename, "subfolder": "", "type": "input" },
         "render_mask_details": { "name": render_mask_filename, "subfolder": "", "type": "input" }
     }
+    
+@server.PromptServer.instance.routes.post("/layersystem/delete_file")
+async def delete_file_route(request):
+    try:
+        post_data = await request.json()
+        filename = post_data.get("filename")
+        subfolder = post_data.get("subfolder", "") # On gère le sous-dossier
+
+        if not filename:
+            return web.Response(status=400, text="Nom de fichier manquant")
+
+        # Sécurité : On s'assure de ne supprimer que dans le dossier 'input'
+        input_dir = folder_paths.get_input_directory()
+        file_path = os.path.join(input_dir, subfolder, filename)
+        
+        # On normalise les chemins pour éviter les attaques (ex: ../../)
+        if os.path.commonpath([input_dir]) != os.path.commonpath([input_dir, file_path]):
+            return web.Response(status=403, text="Accès interdit")
+
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"[Layer System] Fichier supprimé : {file_path}")
+            return web.json_response({"success": True, "message": f"Fichier {filename} supprimé."})
+        else:
+            return web.json_response({"success": False, "message": "Fichier non trouvé."}, status=404)
+
+    except Exception as e:
+        print(f"[Layer System] ERREUR API delete_file: {e}")
+        return web.Response(status=500, text=str(e))
 
 NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }
 NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layer System" }
