@@ -57,14 +57,12 @@ def start_preview_server():
         preview_server_thread = thread
         print(f"\n[Layer System] INFO: Starting the local preview server on http://127.0.0.1:{PREVIEW_SERVER_PORT}")
 
-# --- Fonctions utilitaires de conversion ---
 def tensor_to_pil(tensor):
     return Image.fromarray(np.clip(255. * tensor.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
 
 def pil_to_tensor(image):
     return torch.from_numpy(np.array(image).astype(np.float32) / 255.0).unsqueeze(0)
 
-# --- Fonction de préparation des calques ---
 def prepare_layer(top_image, base_image, resize_mode, scale, offset_x, offset_y):
     B, base_H, base_W, C = base_image.shape
     _, top_H, top_W, top_C = top_image.shape
@@ -162,7 +160,7 @@ class LayerSystem:
         return top
 
     def composite_layers(self, _properties_json="{}", **kwargs):
-        print(f"[Layer System DEBUG] JSON reçu par Python: {_properties_json}")
+       # print(f"[Layer System DEBUG] JSON reçu par Python: {_properties_json}")
         start_preview_server()
 
         try:
@@ -432,25 +430,21 @@ class LayerSystem:
             final_image = pil_to_tensor(pil_image)
         try:
             active_files = set()
-    # Ajoute le fichier de base s'il existe
+
             if base_props.get("source_filename"):
                 active_files.add(base_props["source_filename"])
-            elif base_props.get("filename"): # Compatibilité avec l'ancien format
+            elif base_props.get("filename"): 
                 active_files.add(base_props["filename"])
     
-    # Ajoute tous les fichiers des calques et de leurs masques
             for layer_name, props in layers_properties.items():
                 if props.get("source_filename"):
                     active_files.add(props["source_filename"])
                 if props.get("internal_mask_filename"):
                     active_files.add(props["internal_mask_filename"])
-        # compatibilité avec les anciens masques removebg
                 if props.get("internal_preview_mask_details"):
                      active_files.add(props["internal_preview_mask_details"]["name"])
 
-
             input_dir = folder_paths.get_input_directory()
-    # Trouve tous les fichiers créés par le LayerSystem sur le disque
             disk_files = glob.glob(os.path.join(input_dir, "layersystem_*.png"))
     
             for file_path in disk_files:
@@ -529,25 +523,23 @@ async def delete_file_route(request):
     try:
         post_data = await request.json()
         filename = post_data.get("filename")
-        subfolder = post_data.get("subfolder", "") # On gère le sous-dossier
+        subfolder = post_data.get("subfolder", "")
 
         if not filename:
             return web.Response(status=400, text="Nom de fichier manquant")
 
-        # Sécurité : On s'assure de ne supprimer que dans le dossier 'input'
         input_dir = folder_paths.get_input_directory()
         file_path = os.path.join(input_dir, subfolder, filename)
         
-        # On normalise les chemins pour éviter les attaques (ex: ../../)
         if os.path.commonpath([input_dir]) != os.path.commonpath([input_dir, file_path]):
             return web.Response(status=403, text="Accès interdit")
 
         if os.path.exists(file_path):
             os.remove(file_path)
-            print(f"[Layer System] Fichier supprimé : {file_path}")
-            return web.json_response({"success": True, "message": f"Fichier {filename} supprimé."})
+            print(f"[Layer System] deleted file : {file_path}")
+            return web.json_response({"success": True, "message": f"file {filename} supprimé."})
         else:
-            return web.json_response({"success": False, "message": "Fichier non trouvé."}, status=404)
+            return web.json_response({"success": False, "message": "file not found."}, status=404)
 
     except Exception as e:
         print(f"[Layer System] ERREUR API delete_file: {e}")
