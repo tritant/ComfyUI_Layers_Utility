@@ -110,6 +110,18 @@ app.registerExtension({
             onNodeCreated?.apply(this, arguments);
             this.base_image_properties = null;
             this.layer_properties = this.layer_properties || {};
+			
+	    const onRemoved_original = this.onRemoved;
+        this.onRemoved = () => {
+        onRemoved_original?.apply(this, arguments);
+        if (this.toolbar?.contextualToolbar) {
+            this.toolbar.contextualToolbar.remove();
+        }
+        if (this.toolbar?.maskManager?.contextualToolbar) {
+            this.toolbar.maskManager.contextualToolbar.remove();
+        }
+    };
+			
 const topSpacer = { 
     name: "global_top_spacer", 
     type: "CUSTOM_SPACER", 
