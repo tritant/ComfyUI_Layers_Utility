@@ -247,7 +247,6 @@ nodeType.prototype.onResize = function(size) {
         return;
     }
     
-    // Cette partie est correcte, elle gère la proportion du canvas de preview
     const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
     if (anchorWidget) {
         const aspectRatio = this.basePreviewImage.naturalHeight / this.basePreviewImage.naturalWidth;
@@ -262,7 +261,7 @@ nodeType.prototype.onResize = function(size) {
     if (anchorWidget?.computeSize) {
         delete anchorWidget.computeSize;
     }
-    // Le redessin du canvas est aussi correct
+
     if (this.previewCanvas) {
         if (this.redraw_req) cancelAnimationFrame(this.redraw_req);
         this.redraw_req = requestAnimationFrame(() => {
@@ -270,35 +269,31 @@ nodeType.prototype.onResize = function(size) {
             this.redraw_req = null;
         });
     }
-    // ▼▼▼ LA CORRECTION EST ICI ▼▼▼
-    // On redessine les headers en utilisant la bonne logique.
-    
-    // 1. On redessine le header de la base (s'il existe)
+
     if (this.base_image_properties) {
         const baseHeaderAnchor = this.widgets.find(w => w.name === 'header_anchor_1');
         if (baseHeaderAnchor && baseHeaderAnchor.canvas) {
             this.drawHeaderCanvas(baseHeaderAnchor.canvas, 'base_image');
         }
     }
-    // 2. On redessine les headers des calques actifs
+
     const activeLayerKeys = Object.keys(this.layer_properties);
     for (const layerName of activeLayerKeys) {
         const layerIndex = parseInt(layerName.split('_')[1]);
-        // On utilise l'index + 1 pour trouver la bonne ancre (layer_1 -> ancre 2)
         const headerAnchor = this.widgets.find(w => w.name === `header_anchor_${layerIndex + 1}`);
         if (headerAnchor && headerAnchor.canvas) {
             this.drawHeaderCanvas(headerAnchor.canvas, layerName);
         }
     }
-    // ▲▲▲ FIN DE LA CORRECTION ▲▲▲
-    
     this._resizing = false;
 };
+
 nodeType.prototype.onConfigure = function(info) {
     const onConfigureOriginal = nodeType.prototype.__proto__.onConfigure;
     onConfigureOriginal?.apply(this, arguments);
     this.loadedConfig = info;
 };
+
 nodeType.prototype.loadStateFromConfig = function(info) {
     if (this.stateLoaded) return;
     if (info.widgets_values) {
@@ -926,7 +921,6 @@ nodeType.prototype.initializeHeaderCanvases = function() {
         if (!anchor || !anchor.inputEl || anchor.canvas) continue;
         const canvas = document.createElement("canvas");
         anchor.canvas = canvas;
-        console.log(`Canvas créé pour ancre N°${i}:`, canvas);
         const container = anchor.inputEl.parentElement;
         anchor.inputEl.style.display = "none";
         container.appendChild(canvas);
@@ -934,21 +928,16 @@ nodeType.prototype.initializeHeaderCanvases = function() {
         container.style.margin = "0px";
         
         canvas.addEventListener("mousedown", (e) => {
-            // On récupère directement le nom du calque depuis le canvas cliqué !
             const layerName = e.currentTarget.dataset.layerName;
-            // Si c'est le calque de base ou un header vide, on ne fait rien
             if (!layerName) {
                 return;
             }
-    // --- NOUVELLE LOGIQUE POUR LE CLIC SUR LE HEADER DE BASE ---
     if (layerName === 'base_image') {
         const bounds = this.base_image_properties?.replace_icon_bounds;
         if (bounds && e.offsetX >= bounds.x && e.offsetX <= bounds.x + bounds.size &&
             e.offsetY >= bounds.y && e.offsetY <= bounds.y + bounds.size) {
-            // Si on a cliqué sur l'icône, on lance le remplacement
             this.handleBaseImageReplace();
         }
-        // On ne fait rien pour les autres clics sur la base
         return;
     }
             const props = this.layer_properties[layerName];
@@ -957,8 +946,6 @@ nodeType.prototype.initializeHeaderCanvases = function() {
             const layer_index = parseInt(layerName.split("_")[1]);
             const x = e.offsetX;
             const y = e.offsetY;
-            // La logique de clic pour la poubelle (et les autres icônes)
-            // reste exactement la même, mais elle est maintenant 100% fiable.
             if (props.trash_icon_bounds) {
                 const bounds = props.trash_icon_bounds;
                 if (x >= bounds.x && x <= bounds.x + bounds.size && y >= bounds.y && y <= bounds.y + bounds.size) {
@@ -970,8 +957,6 @@ nodeType.prototype.initializeHeaderCanvases = function() {
             }
                     
                     const widgetWidth = this.size[0] - 20;
-                    //const x = e.offsetX;
-                    //const y = e.offsetY;
                     const topPadding = 4;
                     const padding = 8;
                     const moveIconSize = 36;
@@ -1038,10 +1023,6 @@ nodeType.prototype.initializeHeaderCanvases = function() {
                         }
                         
                         this.refreshUI();
-                            /*setTimeout(() => {
-                                
-        this.setDirtyCanvas(true, true);
-    }, 300);*/
                     }
                     this.updatePropertiesJSON();
                 });
@@ -1049,7 +1030,7 @@ nodeType.prototype.initializeHeaderCanvases = function() {
         };
 nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
     if (!canvas) return;
-    // --- SETUP INITIAL DU CANVAS ---
+
     const ctx = canvas.getContext("2d");
     const widgetWidth = this.size[0] - 20;
     const allocatedHeight = 64;
@@ -1061,20 +1042,16 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(ratio, ratio);
     ctx.clearRect(0, 0, widgetWidth, allocatedHeight);
-    // --- DESSIN DU CADRE ---
     ctx.strokeStyle = "#555555";
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, widgetWidth - 2, allocatedHeight - 10);
     const isBaseLayer = layerName === 'base_image';
-    // --- CORRECTION CLÉ : Utiliser la bonne clé pour trouver l'image ---
     let layerImage = null;
     if (this.loaded_preview_images) {
-        // Pour la base, la clé est 'base_image'. Pour les autres, c'est le layerName ('layer_1', etc.)
-        const imageKey = isBaseLayer ? 'base_image' : layerName;
+         const imageKey = isBaseLayer ? 'base_image' : layerName;
         layerImage = this.loaded_preview_images[imageKey];
     }
-    // --- FIN DE LA CORRECTION ---
-    // --- Définition des positions (INCHANGÉES) ---
+
     const topPadding = 4;
     const padding = 8;
     const moveIconSize = 36;
@@ -1091,39 +1068,26 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
     const textY = topPadding + thumbSize / 2;
     const thumbY = topPadding;
     
-//setTimeout(() => {
-    // ==========================================================
-    // CAS 1 : C'est le calque de base (header simplifié) - VERSION PATCHÉE
-    // ==========================================================
     if (isBaseLayer) {
         canvas.dataset.layerName = 'base_image';
-        
-        // ▼▼▼ MODIFICATION 1 : On utilise une couleur fixe et sûre ▼▼▼
-        ctx.fillStyle = '#FFFFFF'; // Blanc
-        
+        ctx.fillStyle = '#FFFFFF'; 
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.font = "14px Arial";
-        // ▼▼▼ MODIFICATION 2 : On retire le paramètre 'maxWidth' par sécurité ▼▼▼
         ctx.fillText(`▶ Base Image`, 5, textY);
-    // --- DESSIN DE L'ICÔNE REMPLACER ---
     const replaceIconSize = 36;
-    // On la positionne à gauche de la miniature
     const replaceIconX = thumbX - replaceIconSize - padding;
     const replaceIconY = topPadding + (thumbSize - replaceIconSize) / 2;
-    // On sauvegarde sa position pour le clic
     if (this.base_image_properties) {
         this.base_image_properties.replace_icon_bounds = { x: replaceIconX, y: replaceIconY, size: replaceIconSize };
     }
     ctx.save();
     ctx.translate(replaceIconX, replaceIconY);
     ctx.scale(replaceIconSize / 24, replaceIconSize / 24);
-    ctx.strokeStyle = "#CCCCCC"; // Couleur neutre
+    ctx.strokeStyle = "#CCCCCC";
     ctx.lineWidth = 2;
     ctx.stroke(replaceIconPath);
     ctx.restore();
-    // --- FIN DU DESSIN DE L'ICÔNE ---
-        // Le reste de votre code est parfait
         ctx.fillStyle = "#353535";
         ctx.fillRect(thumbX, thumbY, thumbSize, thumbSize);
         if (layerImage && layerImage.naturalWidth > 0) {
@@ -1138,16 +1102,13 @@ nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
                 
         return; 
     }
-    // ==========================================================
-    // CAS 2 : C'est un calque normal (header complet)
-    // ==========================================================
+
     const props = this.layer_properties[layerName];
     if (!props) return;
 canvas.dataset.layerName = layerName;
     const layer_index = parseInt(layerName.split("_")[1]);
     const total_layers = Object.keys(this.layer_properties).length;
     
-    // --- Dessin du texte du header ---
     ctx.fillStyle = !props.layer_collapsed ? "#4CAF50" : LiteGraph.WIDGET_TEXT_COLOR;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
@@ -1155,9 +1116,6 @@ canvas.dataset.layerName = layerName;
     const triangle = props.layer_collapsed ? "▶" : "▼";
     const textMaxWidth = moveIconX - (padding * 3) - 24;
     ctx.fillText(`${triangle} Layer ${layer_index}`, 5, textY, textMaxWidth);
-    // --- DESSIN DES ICÔNES ---
-    // (Cette partie est identique à la version précédente et correcte)
-    // NOUVEAU : Icône Poubelle
     const trashSize = 36;
     const trashX = moveIconX - trashSize - padding;
     const trashY = topPadding + (thumbSize - trashSize) / 2;
@@ -1170,7 +1128,6 @@ canvas.dataset.layerName = layerName;
     ctx.stroke(trashIconPath);
     ctx.restore();
     
-    // Icône Déplacement
     const moveIconY = topPadding + (thumbSize - moveIconSize) / 2;
     const isMoving = this.movingLayer === layerName;
     ctx.save();
@@ -1180,7 +1137,7 @@ canvas.dataset.layerName = layerName;
     ctx.lineWidth = 2;
     ctx.stroke(moveIconPath);
     ctx.restore();
-    // Flèches de déplacement
+
     const isFirst = layer_index <= 1;
     const isLast = layer_index >= total_layers;
     const arrowUpY = topPadding + (thumbSize / 2 - arrowSize) + 4;
@@ -1197,7 +1154,7 @@ canvas.dataset.layerName = layerName;
     ctx.lineWidth = 3;
     ctx.stroke(arrowDownPath);
     ctx.restore();
-    // Cadenas
+
     const lockY = topPadding + (thumbSize - lockSize) / 2;
     ctx.save();
     ctx.translate(lockX, lockY);
@@ -1206,7 +1163,7 @@ canvas.dataset.layerName = layerName;
     ctx.lineWidth = 2;
     ctx.stroke(this.accordionMode ? lockIconPath : unlockIconPath);
     ctx.restore();
-    // Miniature
+
     ctx.fillStyle = "#353535";
     ctx.fillRect(thumbX, thumbY, thumbSize, thumbSize);
     if (layerImage && layerImage.naturalWidth > 0) {
@@ -1219,7 +1176,6 @@ canvas.dataset.layerName = layerName;
         ctx.drawImage(layerImage, 0, 0, layerImage.naturalWidth, layerImage.naturalHeight, destX, destY, destWidth, destHeight);
     }
     
-    // Œil
     const eyeY = topPadding + (thumbSize - eyeSize) / 2;
     ctx.save();
     ctx.translate(eyeX, eyeY);
@@ -1244,18 +1200,15 @@ nodeType.prototype.handleBaseImageReplace = function() {
         const originalFile = e.target.files[0];
         try {
             const staticFilename = "layersystem_base.png";
-            // On crée un nouveau Fichier en mémoire avec le nom statique
             const newFile = new File([originalFile], staticFilename, { type: originalFile.type });
             const formData = new FormData();
             formData.append('image', newFile);
             formData.append('overwrite', 'true');
             formData.append('type', 'input');
-            //formData.append('subfolder', 'LayerSystem');
             
             const response = await fetch('/upload/image', { method: 'POST', body: formData });
             const data = await response.json();
             
-            // On écrase les anciennes propriétés de la base avec les nouvelles
             this.base_image_properties = { filename: data.name, details: data };
             this.updatePropertiesJSON();
             app.queuePrompt();
@@ -1301,19 +1254,16 @@ nodeType.prototype.handleBaseImageReplace = function() {
         };
         
 nodeType.prototype.refreshUI = function() {
-    // S'assure que les widgets (sliders, etc.) correspondent à l'état des calques
     this.updateLayerWidgets();
     const activeLayerKeys = Object.keys(this.layer_properties);
     const activeLayers = new Set(activeLayerKeys);
     
-    // --- GESTION DU CALQUE DE BASE ---
     const baseAnchor = this.widgets.find(w => w.name === `header_anchor_1`);
     if (baseAnchor) {
         if (this.base_image_properties) {
             baseAnchor.hidden = false;
             baseAnchor.computeSize = (width) => [width, 64];
             if (baseAnchor.canvas) {
-                // On dessine le header simplifié de la base
                 this.drawHeaderCanvas(baseAnchor.canvas, 'base_image');
             }
         } else {
@@ -1321,9 +1271,8 @@ nodeType.prototype.refreshUI = function() {
             baseAnchor.computeSize = () => [0, -4];
         }
     }
-    // --- GESTION DES CALQUES NORMAUX (commence à la 2ème ancre) ---
+
     for (let i = 2; i <= MAX_LAYERS; i++) {
-        // L'ancre N°2 correspond au calque N°1, etc.
         const layerName = `layer_${i - 1}`;
         const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
         if (!anchor) continue;
@@ -1339,17 +1288,15 @@ nodeType.prototype.refreshUI = function() {
             anchor.computeSize = () => [0, -4];
         }
     }
-    // --- Votre logique pour déplier le premier calque ---
-    // (Adaptée pour ne s'appliquer que s'il n'y a pas de calque de base)
+
     if (!this.base_image_properties && activeLayerKeys.length === 1) {
         const layerName = activeLayerKeys[0];
         if (this.layer_properties[layerName]) {
             this.layer_properties[layerName].layer_collapsed = false;
-            // On redemande une mise à jour de la visibilité pour ce calque
             this.updateLayerVisibility(layerName);
         }
     }
-    // --- Le reste de votre fonction, inchangé ---
+
     if (this.toolbar) {
         if (this.toolbar.activeTool === 'mask') {
             this.toolbar.maskManager.show();
@@ -1363,7 +1310,6 @@ nodeType.prototype.refreshUI = function() {
 };
         
 nodeType.prototype.moveLayer = function(layer_index, direction) {
-    // 1. Convertir nos objets en un tableau facile à manipuler
     let layers_array = Object.entries(this.layer_properties).map(([name, props]) => {
         const maskName = name.replace('layer_', 'mask_');
         return {
@@ -1371,20 +1317,17 @@ nodeType.prototype.moveLayer = function(layer_index, direction) {
             props,
             preview_img: this.loaded_preview_images ? this.loaded_preview_images[name] : null,
             preview_data: this.preview_data ? this.preview_data[name] : null,
-            // ▼▼▼ ON AJOUTE LA GESTION DES MASQUES ICI ▼▼▼
             mask_img: this.loaded_preview_images ? this.loaded_preview_images[maskName] : null,
             mask_data: this.preview_data ? this.preview_data[maskName] : null
-            // ▲▲▲ FIN DE L'AJOUT ▲▲▲
         };
     });
-    // 2. Trouver l'index du calque à déplacer
+
     const fromIndex = layers_array.findIndex(l => l.name === `layer_${layer_index}`);
     if (fromIndex === -1) return;
-    // 3. Calculer la nouvelle position et effectuer l'échange
+
     const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
     const element = layers_array.splice(fromIndex, 1)[0];
     layers_array.splice(toIndex, 0, element);
-    // 4. Vider les anciens objets et les reconstruire dans le bon ordre
     this.layer_properties = {};
     const old_loaded_preview_images = this.loaded_preview_images || {};
     const old_preview_data = this.preview_data || {};
@@ -1396,16 +1339,12 @@ nodeType.prototype.moveLayer = function(layer_index, direction) {
         this.layer_properties[newLayerName] = layer.props;
         if (layer.preview_img) this.loaded_preview_images[newLayerName] = layer.preview_img;
         if (layer.preview_data) this.preview_data[newLayerName] = layer.preview_data;
-        
-        // ▼▼▼ ON RÉ-ASSOCIE LES MASQUES CORRECTEMENT ▼▼▼
         if (layer.mask_img) this.loaded_preview_images[newMaskName] = layer.mask_img;
         if (layer.mask_data) this.preview_data[newMaskName] = layer.mask_data;
-        // ▲▲▲ FIN DE L'AJOUT ▲▲▲
         if (this.movingLayer === layer.name) {
             this.movingLayer = newLayerName;
         }
     });
-    // 5. Rafraîchir l'interface
     this.updatePropertiesJSON();
     this.refreshUI();
     this.redrawPreviewCanvas();
@@ -1468,9 +1407,6 @@ nodeType.prototype.addLayerWidgets = function(layer_name) {
 };
         
 nodeType.prototype.updateLayerWidgets = function() {
-    // 1. On nettoie en gardant uniquement les widgets permanents.
-    // C'est votre logique originale, très efficace.
-    // J'ai juste ajouté notre nouveau bouton "Add Image" à la liste.
     this.widgets = this.widgets.filter(w => 
         w.name.includes("_anchor") || 
         w.name === "_properties_json" ||
@@ -1478,19 +1414,14 @@ nodeType.prototype.updateLayerWidgets = function() {
         w.name === "global_top_spacer"
     );
     
-    // 2. On récupère la liste des calques actifs depuis notre état interne.
     const activeLayerKeys = Object.keys(this.layer_properties);
-    
-    // 3. On trie les calques pour s'assurer qu'ils sont ajoutés dans le bon ordre.
     activeLayerKeys.sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
     
-    // 4. On recrée les widgets pour chaque calque actif.
-    // Comme on a tout supprimé à l'étape 1, on n'a plus besoin de vérifier
-    // si les widgets existent déjà. On les recrée simplement.
     for (const layerName of activeLayerKeys) {
         this.addLayerWidgets(layerName);
     }
 };
+
 nodeType.prototype.handleDisconnectedInputs = function() {
     const connected_layer_names = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
     const inputs_to_remove = [];
@@ -1594,7 +1525,6 @@ nodeType.prototype.handleInternalImageLoad = function() {
         const originalFile = e.target.files[0];
 
         try {
-            // ▼▼▼ ON RESTAURE LA LOGIQUE BASE vs CALQUE ▼▼▼
             let staticFilename;
             const isBaseImage = !this.base_image_properties;
 
@@ -1615,10 +1545,8 @@ nodeType.prototype.handleInternalImageLoad = function() {
             const data = await response.json();
 
             if (isBaseImage) {
-                // C'est l'image de base, on la met dans la bonne variable
                 this.base_image_properties = { filename: data.name, details: data };
             } else {
-                // C'est un calque normal
                 const existingIndices = new Set(Object.keys(this.layer_properties).map(k => parseInt(k.split('_')[1])));
                 let newIndex = 1;
                 while (existingIndices.has(newIndex)) { newIndex++; }
@@ -1641,7 +1569,6 @@ nodeType.prototype.handleInternalImageLoad = function() {
             this.updatePropertiesJSON();
             this.refreshUI();
             
-            // On garde le setTimeout pour éviter les bugs de timing au lancement
             setTimeout(() => {
                 app.queuePrompt();
             }, 0);
@@ -1661,7 +1588,6 @@ nodeType.prototype.deleteLayer = function(layerNameToDelete) {
         this.movingLayer = null;
     }
 
-    // --- Suppression du fichier unique sur le serveur ---
     const layerToDeleteProps = this.layer_properties[layerNameToDelete];
     if (layerToDeleteProps && layerToDeleteProps.source_details) {
         const fileDetails = layerToDeleteProps.source_details;
@@ -1680,7 +1606,6 @@ nodeType.prototype.deleteLayer = function(layerNameToDelete) {
         if (layerToDeleteProps.internal_preview_mask_details) deleteFileOnServer(layerToDeleteProps.internal_preview_mask_details);
     }
     
-    // --- Reconstruction propre de l'état ---
     const layersToKeep = [];
     const sortedKeys = Object.keys(this.layer_properties).sort((a, b) => parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
     
@@ -1718,7 +1643,6 @@ nodeType.prototype.deleteLayer = function(layerNameToDelete) {
     this.updatePropertiesJSON();
     this.refreshUI();
     this.redrawPreviewCanvas();
-    //if(this.commitStateChange) this.commitStateChange(); else app.queuePrompt();
 };
  
  nodeType.prototype.logFullState = function(label) {

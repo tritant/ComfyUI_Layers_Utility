@@ -45,7 +45,6 @@ async getSourceImageForActiveLayer() {
         throw new Error("Aucun calque actif n'est sélectionné.");
     }
 
-    // 1. Trouver les détails du fichier dans notre état interne
     const layerProps = this.node.layer_properties[this.activeLayer.name];
     if (!layerProps || !layerProps.source_filename) {
         throw new Error("Impossible de trouver le fichier source pour le calque actif.");
@@ -53,14 +52,12 @@ async getSourceImageForActiveLayer() {
     const filename = layerProps.source_filename;
     const details = layerProps.source_details;
 
-    // 2. Construire l'URL de l'image via l'API de ComfyUI
     const imageUrl = new URL("/view", window.location.origin);
     imageUrl.searchParams.set("filename", filename);
     imageUrl.searchParams.set("type", details.type || "input");
     imageUrl.searchParams.set("subfolder", details.subfolder || "");
-    imageUrl.searchParams.set("t", Date.now()); // Pour éviter le cache du navigateur
+    imageUrl.searchParams.set("t", Date.now());
 
-    // 3. Charger l'image depuis l'URL et la retourner
     try {
         const img = new Image();
         img.src = imageUrl.href;
@@ -91,7 +88,6 @@ hasActiveMask() {
         return false;
     }
     const layerProps = this.node.layer_properties[this.activeLayer.name];
-    // La seule source de vérité est maintenant la présence d'un masque interne.
     return layerProps && layerProps.internal_mask_filename;
 }
 
