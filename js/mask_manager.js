@@ -40,25 +40,38 @@ export class MaskManager {
         return await response.json();
     }
 
-    async getSourceImageForActiveLayer() {
-        if (!this.activeLayer) return null;
-        const inputName = `layer_${this.activeLayer.index}`;
-        const inputSlot = this.node.inputs.find(i => i.name === inputName);
-        if (!inputSlot || inputSlot.link === null) return null;
-        const link = app.graph.links[inputSlot.link];
-        let currentNode = app.graph.getNodeById(link.origin_id);
-        for (let i = 0; i < 10; i++) {
-            if (!currentNode) return null;
-            if (currentNode.type === "LoadImage") {
-                return currentNode.imgs && currentNode.imgs.length > 0 ? currentNode.imgs[0] : null;
-            }
-            const parentInput = currentNode.inputs.find(inp => inp.type === "IMAGE");
-            if (!parentInput || !parentInput.link) return null;
-            const parentLink = app.graph.links[parentInput.link];
-            currentNode = app.graph.getNodeById(parentLink.origin_id);
-        }
-        return null;
+async getSourceImageForActiveLayer() {
+    if (!this.activeLayer) {
+        throw new Error("Aucun calque actif n'est sélectionné.");
     }
+
+    const layerProps = this.node.layer_properties[this.activeLayer.name];
+    if (!layerProps || !layerProps.source_filename) {
+        throw new Error("Impossible de trouver le fichier source pour le calque actif.");
+    }
+    const filename = layerProps.source_filename;
+    const details = layerProps.source_details;
+
+    const imageUrl = new URL("/view", window.location.origin);
+    imageUrl.searchParams.set("filename", filename);
+    imageUrl.searchParams.set("type", details.type || "input");
+    imageUrl.searchParams.set("subfolder", details.subfolder || "");
+    imageUrl.searchParams.set("t", Date.now());
+
+    try {
+        const img = new Image();
+        img.src = imageUrl.href;
+        img.crossOrigin = "anonymous";
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+        return img;
+    } catch (error) {
+        console.error(`[Layer System] Échec du chargement de l'image source : ${imageUrl.href}`, error);
+        throw new Error(`Impossible de charger l'image source : ${filename}`);
+    }
+}
     
     getActiveLayer() {
         if (!this.node.layer_properties) return null;
@@ -70,14 +83,13 @@ export class MaskManager {
         return null;
     }
 
-    hasActiveMask() {
-        if (!this.activeLayer) return false;
-        const layerProps = this.node.layer_properties[this.activeLayer.name];
-        if (layerProps && layerProps.internal_mask_filename) return true;
-        const maskInputName = `mask_${this.activeLayer.index}`;
-        const maskInputSlot = this.node.findInputSlot(maskInputName);
-        return maskInputSlot !== -1 && this.node.inputs[maskInputSlot].link !== null;
+hasActiveMask() {
+    if (!this.activeLayer) {
+        return false;
     }
+    const layerProps = this.node.layer_properties[this.activeLayer.name];
+    return layerProps && layerProps.internal_mask_filename;
+}
 
     async handleCreateMask() {
         this.activeLayer = this.getActiveLayer();

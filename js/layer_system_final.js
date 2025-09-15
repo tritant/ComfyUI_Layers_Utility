@@ -1,6 +1,5 @@
 import { app } from "/scripts/app.js";
 import { Toolbar } from './toolbar.js';
-
 function applyMask(layerImage, maskImage) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -20,7 +19,7 @@ function applyMask(layerImage, maskImage) {
 }
 const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "soft-light", "hard-light", "difference", "color-dodge", "color-burn"];
 const RESIZE_MODES = ["stretch", "fit", "cover", "crop"];
-const MAX_LAYERS = 10;
+const MAX_LAYERS = 11;
 const rotateCursorSVG = `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none"><path d="M12 3A9 9 0 1 1 3 12" stroke="black" stroke-width="3.5" stroke-linecap="round"/><path d="M12 3A9 9 0 1 1 3 12" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 const rotateCursorDataUri = `data:image/svg+xml;base64,${btoa(rotateCursorSVG)}`;
 const rotateCursorStyle = `url(${rotateCursorDataUri}) 12 12, auto`;
@@ -31,6 +30,8 @@ const unlockIconPath = new Path2D("M9 7V6a3 3 0 116 0v1h2V6a5 5 0 00-10 0v1H5v12
 const arrowUpPath = new Path2D("M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z");
 const arrowDownPath = new Path2D("M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z");
 const moveIconPath = new Path2D("M12 2 L12 22 M2 12 L22 12 M12 2 L8 6 M12 2 L16 6 M12 22 L8 18 M12 22 L16 18 M2 12 L6 8 M2 12 L6 16 M22 12 L18 8 M22 12 L18 16");
+const trashIconPath = new Path2D("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z");
+const replaceIconPath = new Path2D("M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z");
 app.registerExtension({
     name: "LayerSystem.DynamicLayers",
     
@@ -86,12 +87,13 @@ app.registerExtension({
                         this.basePreviewImage = this.loaded_preview_images.base_image;
                         resizeHeight.call(this);
                         this.redrawPreviewCanvas();
+                        this.refreshUI();
                     })
                     .catch(e => console.error("[Layer System] At least one preview image could not be loaded.", e));
             }
         };
-		
-		const onDrawBackground = nodeType.prototype.onDrawBackground;
+        
+        const onDrawBackground = nodeType.prototype.onDrawBackground;
         nodeType.prototype.onDrawBackground = function(ctx) {
         onDrawBackground?.apply(this, arguments);
         if (this.toolbar) {
@@ -106,7 +108,34 @@ app.registerExtension({
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
+            this.base_image_properties = null;
             this.layer_properties = this.layer_properties || {};
+			
+	    const onRemoved_original = this.onRemoved;
+        this.onRemoved = () => {
+        onRemoved_original?.apply(this, arguments);
+        if (this.toolbar?.contextualToolbar) {
+            this.toolbar.contextualToolbar.remove();
+        }
+        if (this.toolbar?.maskManager?.contextualToolbar) {
+            this.toolbar.maskManager.contextualToolbar.remove();
+        }
+    };
+			
+const topSpacer = { 
+    name: "global_top_spacer", 
+    type: "CUSTOM_SPACER", 
+    draw: () => {}, 
+    computeSize: () => [0, 10] 
+};
+this.widgets.push(topSpacer);
+            this.addWidget(
+              "button",
+              "Add Image",
+               null,
+               () => { this.handleInternalImageLoad(); }
+            );
+            
             this.basePreviewImage = null;
             this.preview_data = {};
             this.loaded_preview_images = {};
@@ -133,7 +162,7 @@ app.registerExtension({
             this.rotationOffsetAngle = 0.0;
             
             this.toolbar = new Toolbar(this);
-			this.size[0] = 800;
+            this.size[0] = 800;
             
             setTimeout(() => {
                 const anchorWidget = this.widgets.find(w => w.name === "_preview_anchor");
@@ -214,7 +243,11 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
                     p_widget.hidden = true;
                     p_widget.computeSize = () => [0, -4];
                 }
-                this.refreshUI();
+ if (this.loadedConfig) {
+    this.loadStateFromConfig(this.loadedConfig);
+} else {
+    this.refreshUI();
+}
             }, 0);
         };
         
@@ -237,9 +270,10 @@ nodeType.prototype.onResize = function(size) {
     
     const newComputedSize = this.computeSize();
     this.size[1] = newComputedSize[1];
-     if (anchorWidget?.computeSize) {
+    if (anchorWidget?.computeSize) {
         delete anchorWidget.computeSize;
     }
+
     if (this.previewCanvas) {
         if (this.redraw_req) cancelAnimationFrame(this.redraw_req);
         this.redraw_req = requestAnimationFrame(() => {
@@ -248,41 +282,60 @@ nodeType.prototype.onResize = function(size) {
         });
     }
 
-    for (let i = 1; i <= 10; i++) { // Remplacer 10 par MAX_LAYERS serait mieux
-        const headerAnchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
-        if (headerAnchor && headerAnchor.canvas) {
-            this.drawHeaderCanvas(headerAnchor.canvas, `layer_${i}`);
+    if (this.base_image_properties) {
+        const baseHeaderAnchor = this.widgets.find(w => w.name === 'header_anchor_1');
+        if (baseHeaderAnchor && baseHeaderAnchor.canvas) {
+            this.drawHeaderCanvas(baseHeaderAnchor.canvas, 'base_image');
         }
     }
-    
+
+    const activeLayerKeys = Object.keys(this.layer_properties);
+    for (const layerName of activeLayerKeys) {
+        const layerIndex = parseInt(layerName.split('_')[1]);
+        const headerAnchor = this.widgets.find(w => w.name === `header_anchor_${layerIndex + 1}`);
+        if (headerAnchor && headerAnchor.canvas) {
+            this.drawHeaderCanvas(headerAnchor.canvas, layerName);
+        }
+    }
     this._resizing = false;
 };
-nodeType.prototype.onConfigure = function (info) {
+
+nodeType.prototype.onConfigure = function(info) {
     const onConfigureOriginal = nodeType.prototype.__proto__.onConfigure;
     onConfigureOriginal?.apply(this, arguments);
+    this.loadedConfig = info;
+};
+
+nodeType.prototype.loadStateFromConfig = function(info) {
+    if (this.stateLoaded) return;
     if (info.widgets_values) {
-        let mainDataString = null;
-        
-        for (const val of info.widgets_values) {
-            if (typeof val === 'string' && val.startsWith('{"layers":')) {
-                mainDataString = val;
-                break;
-            }
-        }
-        if (mainDataString) {
+        const jsonWidgetIndex = this.widgets.findIndex(w => w.name === "_properties_json");
+        if (jsonWidgetIndex > -1 && info.widgets_values[jsonWidgetIndex]) {
             try {
-                const props = JSON.parse(mainDataString);
+                const props = JSON.parse(info.widgets_values[jsonWidgetIndex]);
+                this.base_image_properties = props.base || null;
                 this.layer_properties = props.layers || {};
+                this.preview_data = props.preview_data || {};
                 if (this.toolbar) {
                     this.toolbar.textElements = props.texts || [];
                 } else {
                     this.loadedTextData = props.texts || [];
                 }
-                console.log("[Layer System] Data successfully loaded from main block.");
-            } catch(e) { console.error("[LayerSystem] Error parsing main JSON in onConfigure", e); }
+                this.stateLoaded = true;
+                app.queuePrompt();
+                if (Object.keys(this.preview_data).length > 0) {
+                   this.loadAndRedrawPreviews();
+                } else {
+                   this.refreshUI();
+                }
+            } catch (e) {
+                console.error("[Layer System] Error loading JSON state", e);
+                this.refreshUI();
+            }
         }
+    } else {
+        this.refreshUI();
     }
-    this.isConfigured = true;
 };
         
         const onConnectionsChange = nodeType.prototype.onConnectionsChange;
@@ -290,7 +343,7 @@ nodeType.prototype.onConfigure = function (info) {
             onConnectionsChange?.apply(this, arguments);
             if (side === 1) { setTimeout(() => this.refreshUI(), 0); }
         };
-		
+        
         nodeType.prototype.redrawPreviewCanvas = function() {
             if (!this.previewCanvas || !this.size || !this.basePreviewImage || !this.basePreviewImage.naturalWidth) {
                 if(this.previewCtx) this.previewCtx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
@@ -322,7 +375,7 @@ nodeType.prototype.onConfigure = function (info) {
             ctx.drawImage(baseImg, destX, destY, destWidth, destHeight);
             this.previewCanvasScale = destWidth / baseImg.naturalWidth;
             
-            const sortedLayerNames = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1])).map(i => i.name);
+            const sortedLayerNames = Object.keys(this.layer_properties).sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
             
             for (const layerName of sortedLayerNames) {
                 const props = this.layer_properties[layerName];
@@ -874,28 +927,48 @@ nodeType.prototype.getHandleAtPos = function(e) {
             }
         };
         
-        nodeType.prototype.initializeHeaderCanvases = function() {
-            for (let i = 1; i <= MAX_LAYERS; i++) {
-                const layerName = `layer_${i}`;
-                const layer_index = i;
-                const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
-                if (!anchor || !anchor.inputEl || anchor.canvas) continue;
-                const canvas = document.createElement("canvas");
-                anchor.canvas = canvas;
-                
-                const container = anchor.inputEl.parentElement;
-                anchor.inputEl.style.display = "none";
-                container.appendChild(canvas);
-                container.style.padding = "0px";
-                container.style.margin = "0px";
-                
-                canvas.addEventListener("mousedown", (e) => {
-                    const props = this.layer_properties[layerName];
-                    if (!props) return;
+nodeType.prototype.initializeHeaderCanvases = function() {
+    for (let i = 1; i <= MAX_LAYERS; i++) {
+        const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
+        if (!anchor || !anchor.inputEl || anchor.canvas) continue;
+        const canvas = document.createElement("canvas");
+        anchor.canvas = canvas;
+        const container = anchor.inputEl.parentElement;
+        anchor.inputEl.style.display = "none";
+        container.appendChild(canvas);
+        container.style.padding = "0px";
+        container.style.margin = "0px";
+        
+        canvas.addEventListener("mousedown", (e) => {
+            const layerName = e.currentTarget.dataset.layerName;
+            if (!layerName) {
+                return;
+            }
+    if (layerName === 'base_image') {
+        const bounds = this.base_image_properties?.replace_icon_bounds;
+        if (bounds && e.offsetX >= bounds.x && e.offsetX <= bounds.x + bounds.size &&
+            e.offsetY >= bounds.y && e.offsetY <= bounds.y + bounds.size) {
+            this.handleBaseImageReplace();
+        }
+        return;
+    }
+            const props = this.layer_properties[layerName];
+            if (!props) return;
+            
+            const layer_index = parseInt(layerName.split("_")[1]);
+            const x = e.offsetX;
+            const y = e.offsetY;
+            if (props.trash_icon_bounds) {
+                const bounds = props.trash_icon_bounds;
+                if (x >= bounds.x && x <= bounds.x + bounds.size && y >= bounds.y && y <= bounds.y + bounds.size) {
+                    if (confirm(`Are you sure you want to delete Layer ${layer_index}?`)) {
+                        this.deleteLayer(layerName);
+                    }
+                    return;
+                }
+            }
                     
                     const widgetWidth = this.size[0] - 20;
-                    const x = e.offsetX;
-                    const y = e.offsetY;
                     const topPadding = 4;
                     const padding = 8;
                     const moveIconSize = 36;
@@ -929,7 +1002,7 @@ nodeType.prototype.getHandleAtPos = function(e) {
                     } else if (isInUpArrow) {
                         if (layer_index > 1) { this.moveLayer(layer_index, "up"); }
                     } else if (isInDownArrow) {
-                        const total_layers = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).length;
+                        const total_layers = Object.keys(this.layer_properties).length;
                         if (layer_index < total_layers) { this.moveLayer(layer_index, "down"); }
                     } else if (isInMoveIcon && props.resize_mode === 'crop' && (!this.toolbar || !this.toolbar.activeTool)) {
                         if (this.movingLayer === layerName) {
@@ -967,113 +1040,199 @@ nodeType.prototype.getHandleAtPos = function(e) {
                 });
             }
         };
-        nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
-            if (!canvas || !this.layer_properties[layerName]) return;
-            const props = this.layer_properties[layerName];
-            const layer_index = parseInt(layerName.split("_")[1]);
-            const total_layers = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).length;
-            const layerImage = this.loaded_preview_images ? this.loaded_preview_images[layerName] : null;
-            const ctx = canvas.getContext("2d");
-            const widgetWidth = this.size[0] - 20;
-            const allocatedHeight = 64;
-            const ratio = window.devicePixelRatio || 1;
-            canvas.style.width = widgetWidth + "px";
-            canvas.style.height = allocatedHeight + "px";
-            canvas.width = widgetWidth * ratio;
-            canvas.height = allocatedHeight * ratio;
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.scale(ratio, ratio);
-            ctx.clearRect(0, 0, widgetWidth, allocatedHeight);
-            ctx.strokeStyle = "#555555";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(1, 1, widgetWidth - 2, allocatedHeight - 10);
+nodeType.prototype.drawHeaderCanvas = function(canvas, layerName) {
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    const widgetWidth = this.size[0] - 20;
+    const allocatedHeight = 64;
+    const ratio = window.devicePixelRatio || 1;
+    canvas.style.width = widgetWidth + "px";
+    canvas.style.height = allocatedHeight + "px";
+    canvas.width = widgetWidth * ratio;
+    canvas.height = allocatedHeight * ratio;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(ratio, ratio);
+    ctx.clearRect(0, 0, widgetWidth, allocatedHeight);
+    ctx.strokeStyle = "#555555";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, widgetWidth - 2, allocatedHeight - 10);
+    const isBaseLayer = layerName === 'base_image';
+    let layerImage = null;
+    if (this.loaded_preview_images) {
+         const imageKey = isBaseLayer ? 'base_image' : layerName;
+        layerImage = this.loaded_preview_images[imageKey];
+    }
+
+    const topPadding = 4;
+    const padding = 8;
+    const moveIconSize = 36;
+    const arrowSize = 24;
+    const lockSize = 36;
+    const thumbSize = 48;
+    const eyeSize = 36;
+    
+    const eyeX = widgetWidth - eyeSize - padding;
+    const thumbX = eyeX - thumbSize - padding;
+    const lockX = thumbX - lockSize - padding;
+    const arrowBlockX = lockX - arrowSize - padding;
+    const moveIconX = arrowBlockX - moveIconSize - (padding * 2);
+    const textY = topPadding + thumbSize / 2;
+    const thumbY = topPadding;
+    
+    if (isBaseLayer) {
+        canvas.dataset.layerName = 'base_image';
+        ctx.fillStyle = '#FFFFFF'; 
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.font = "14px Arial";
+        ctx.fillText(`▶ Base Image`, 5, textY);
+    const replaceIconSize = 36;
+    const replaceIconX = thumbX - replaceIconSize - padding;
+    const replaceIconY = topPadding + (thumbSize - replaceIconSize) / 2;
+    if (this.base_image_properties) {
+        this.base_image_properties.replace_icon_bounds = { x: replaceIconX, y: replaceIconY, size: replaceIconSize };
+    }
+    ctx.save();
+    ctx.translate(replaceIconX, replaceIconY);
+    ctx.scale(replaceIconSize / 24, replaceIconSize / 24);
+    ctx.strokeStyle = "#CCCCCC";
+    ctx.lineWidth = 2;
+    ctx.stroke(replaceIconPath);
+    ctx.restore();
+        ctx.fillStyle = "#353535";
+        ctx.fillRect(thumbX, thumbY, thumbSize, thumbSize);
+        if (layerImage && layerImage.naturalWidth > 0) {
+            const imgRatio = layerImage.naturalWidth / layerImage.naturalHeight;
+            let destWidth, destHeight, destX, destY;
+            if (imgRatio > 1) { destWidth = thumbSize; destHeight = thumbSize / imgRatio; }
+            else { destHeight = thumbSize; destWidth = thumbSize * imgRatio; }
+            destX = thumbX + (thumbSize - destWidth) / 2;
+            destY = thumbY + (thumbSize - destHeight) / 2;
+            ctx.drawImage(layerImage, 0, 0, layerImage.naturalWidth, layerImage.naturalHeight, destX, destY, destWidth, destHeight);
+        }
+                
+        return; 
+    }
+
+    const props = this.layer_properties[layerName];
+    if (!props) return;
+canvas.dataset.layerName = layerName;
+    const layer_index = parseInt(layerName.split("_")[1]);
+    const total_layers = Object.keys(this.layer_properties).length;
+    
+    ctx.fillStyle = !props.layer_collapsed ? "#4CAF50" : LiteGraph.WIDGET_TEXT_COLOR;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.font = "14px Arial";
+    const triangle = props.layer_collapsed ? "▶" : "▼";
+    const textMaxWidth = moveIconX - (padding * 3) - 24;
+    ctx.fillText(`${triangle} Layer ${layer_index}`, 5, textY, textMaxWidth);
+    const trashSize = 36;
+    const trashX = moveIconX - trashSize - padding;
+    const trashY = topPadding + (thumbSize - trashSize) / 2;
+    props.trash_icon_bounds = { x: trashX, y: trashY, size: trashSize };
+    ctx.save();
+    ctx.translate(trashX, trashY);
+    ctx.scale(trashSize / 24, trashSize / 24);
+    ctx.strokeStyle = "#F44336";
+    ctx.lineWidth = 2;
+    ctx.stroke(trashIconPath);
+    ctx.restore();
+    
+    const moveIconY = topPadding + (thumbSize - moveIconSize) / 2;
+    const isMoving = this.movingLayer === layerName;
+    ctx.save();
+    ctx.translate(moveIconX, moveIconY);
+    ctx.scale(moveIconSize / 24, moveIconSize / 24);
+    ctx.strokeStyle = isMoving ? "#F44" : (props.resize_mode !== 'crop' || (this.toolbar && this.toolbar.activeTool) ? "#555" : LiteGraph.WIDGET_TEXT_COLOR);
+    ctx.lineWidth = 2;
+    ctx.stroke(moveIconPath);
+    ctx.restore();
+
+    const isFirst = layer_index <= 1;
+    const isLast = layer_index >= total_layers;
+    const arrowUpY = topPadding + (thumbSize / 2 - arrowSize) + 4;
+    const arrowDownY = topPadding + (thumbSize / 2) - 4;
+    ctx.save();
+    ctx.translate(arrowBlockX, arrowUpY);
+    ctx.strokeStyle = isFirst ? "#555" : LiteGraph.WIDGET_TEXT_COLOR;
+    ctx.lineWidth = 3;
+    ctx.stroke(arrowUpPath);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(arrowBlockX, arrowDownY);
+    ctx.strokeStyle = isLast ? "#555" : LiteGraph.WIDGET_TEXT_COLOR;
+    ctx.lineWidth = 3;
+    ctx.stroke(arrowDownPath);
+    ctx.restore();
+
+    const lockY = topPadding + (thumbSize - lockSize) / 2;
+    ctx.save();
+    ctx.translate(lockX, lockY);
+    ctx.scale(lockSize / 24, lockSize / 24);
+    ctx.strokeStyle = this.accordionMode ? "#F44" : "#6C6";
+    ctx.lineWidth = 2;
+    ctx.stroke(this.accordionMode ? lockIconPath : unlockIconPath);
+    ctx.restore();
+
+    ctx.fillStyle = "#353535";
+    ctx.fillRect(thumbX, thumbY, thumbSize, thumbSize);
+    if (layerImage && layerImage.naturalWidth > 0) {
+        const imgRatio = layerImage.naturalWidth / layerImage.naturalHeight;
+        let destWidth, destHeight, destX, destY;
+        if (imgRatio > 1) { destWidth = thumbSize; destHeight = thumbSize / imgRatio; } 
+        else { destHeight = thumbSize; destWidth = thumbSize * imgRatio; }
+        destX = thumbX + (thumbSize - destWidth) / 2;
+        destY = thumbY + (thumbSize - destHeight) / 2;
+        ctx.drawImage(layerImage, 0, 0, layerImage.naturalWidth, layerImage.naturalHeight, destX, destY, destWidth, destHeight);
+    }
+    
+    const eyeY = topPadding + (thumbSize - eyeSize) / 2;
+    ctx.save();
+    ctx.translate(eyeX, eyeY);
+    ctx.scale(eyeSize / 24, eyeSize / 24);
+    ctx.strokeStyle = props.enabled ? "#4CAF50" : "#F44";
+    ctx.lineWidth = 1.5;
+    ctx.stroke(eyeIconPath);
+    if (!props.enabled) { ctx.stroke(eyeSlashPath); }
+    ctx.restore();
+    };
+    
+nodeType.prototype.handleBaseImageReplace = function() {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/jpeg,image/png,image/webp';
+    fileInput.style.display = 'none';
+    fileInput.onchange = async (e) => {
+        if (!e.target.files.length) { 
+            document.body.removeChild(fileInput); 
+            return; 
+        }
+        const originalFile = e.target.files[0];
+        try {
+            const staticFilename = "layersystem_base.png";
+            const newFile = new File([originalFile], staticFilename, { type: originalFile.type });
+            const formData = new FormData();
+            formData.append('image', newFile);
+            formData.append('overwrite', 'true');
+            formData.append('type', 'input');
             
-            const topPadding = 4;
-            const padding = 8;
-            const moveIconSize = 36;
-            const arrowSize = 24;
-            const lockSize = 36;
-            const thumbSize = 48;
-            const eyeSize = 36;
+            const response = await fetch('/upload/image', { method: 'POST', body: formData });
+            const data = await response.json();
             
-            const eyeX = widgetWidth - eyeSize - padding;
-            const thumbX = eyeX - thumbSize - padding;
-            const lockX = thumbX - lockSize - padding;
-            const arrowBlockX = lockX - arrowSize - padding;
-            const moveIconX = arrowBlockX - moveIconSize - (padding * 2);
-            const textMaxWidth = moveIconX - padding * 2;
-            
-            const thumbY = topPadding;
-            const eyeY = topPadding + (thumbSize - eyeSize) / 2;
-            const lockY = topPadding + (thumbSize - lockSize) / 2;
-            const textY = topPadding + thumbSize / 2;
-            const arrowUpY = topPadding + (thumbSize / 2 - arrowSize) + 4;
-            const arrowDownY = topPadding + (thumbSize / 2) - 4;
-            const moveIconY = topPadding + (thumbSize - moveIconSize) / 2;
-            if (!props.layer_collapsed) {
-                ctx.fillStyle = "#4CAF50"; 
-            } else {
-                ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-            }
-            ctx.textAlign = "left";
-            ctx.textBaseline = "middle";
-            ctx.font = "14px Arial";
-            const triangle = props.layer_collapsed ? "▶" : "▼";
-            ctx.fillText(`${triangle} Layer ${layer_index} Settings`, 5, textY, textMaxWidth);
-            const isFirst = layer_index <= 1;
-            const isLast = layer_index >= total_layers;
-            const disabledColor = "#555";
-            ctx.save();
-            ctx.translate(arrowBlockX, arrowUpY);
-            ctx.strokeStyle = isFirst ? disabledColor : LiteGraph.WIDGET_TEXT_COLOR;
-            ctx.lineWidth = 3;
-            ctx.stroke(arrowUpPath);
-            ctx.restore();
-            ctx.save();
-            ctx.translate(arrowBlockX, arrowDownY);
-            ctx.strokeStyle = isLast ? disabledColor : LiteGraph.WIDGET_TEXT_COLOR;
-            ctx.lineWidth = 3;
-            ctx.stroke(arrowDownPath);
-            ctx.restore();
-            
-            const isMoving = this.movingLayer === layerName;
-            ctx.save();
-            ctx.translate(moveIconX, moveIconY);
-            ctx.scale(moveIconSize / 24, moveIconSize / 24);
-            ctx.strokeStyle = isMoving 
-                ? "#F44"
-                : (props.resize_mode !== 'crop' || (this.toolbar && this.toolbar.activeTool) ? disabledColor : LiteGraph.WIDGET_TEXT_COLOR);
-            ctx.lineWidth = 2;
-            ctx.stroke(moveIconPath);
-            ctx.restore();
-            
-            ctx.save();
-            ctx.translate(lockX, lockY);
-            ctx.scale(lockSize / 24, lockSize / 24);
-            ctx.strokeStyle = this.accordionMode ? "#F44" : "#6C6";
-            ctx.lineWidth = 2;
-            ctx.stroke(this.accordionMode ? lockIconPath : unlockIconPath);
-            ctx.restore();
-            ctx.fillStyle = "#353535";
-            ctx.fillRect(thumbX, thumbY, thumbSize, thumbSize);
-            if (layerImage && layerImage.naturalWidth > 0) {
-                const imgRatio = layerImage.naturalWidth / layerImage.naturalHeight;
-                let destWidth, destHeight, destX, destY;
-                if (imgRatio > 1) { destWidth = thumbSize; destHeight = thumbSize / imgRatio; } 
-                else { destHeight = thumbSize; destWidth = thumbSize * imgRatio; }
-                destX = thumbX + (thumbSize - destWidth) / 2;
-                destY = thumbY;
-                ctx.drawImage(layerImage, 0, 0, layerImage.naturalWidth, layerImage.naturalHeight, destX, destY, destWidth, destHeight);
-            }
-            ctx.save();
-            ctx.translate(eyeX, eyeY);
-            ctx.scale(eyeSize / 24, eyeSize / 24);
-            ctx.strokeStyle = props.enabled ? "#4CAF50" : "#F44";
-            ctx.lineWidth = 1.5;
-            ctx.stroke(eyeIconPath);
-            if (!props.enabled) { ctx.stroke(eyeSlashPath); }
-            ctx.restore();
-        };
+            this.base_image_properties = { filename: data.name, details: data };
+            this.updatePropertiesJSON();
+            app.queuePrompt();
+        } catch (error) {
+            console.error("[Layer System] Error replacing base image:", error);
+        } finally {
+            document.body.removeChild(fileInput);
+        }
+    };
+    document.body.appendChild(fileInput);
+    fileInput.click();
+};
         
         nodeType.prototype.updateLayerVisibility = function(layerName) {
             const props = this.layer_properties[layerName];
@@ -1106,95 +1265,102 @@ nodeType.prototype.getHandleAtPos = function(e) {
             resizeHeight.call(this);
         };
         
-        nodeType.prototype.refreshUI = function() {
-            this.handleDisconnectedInputs();
-            this.updateLayerWidgets();
-            this.ensureWildcardInputs();
-  
-            const connectedLayers = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null);
-            if (connectedLayers.length === 1) {
-                const layerName = connectedLayers[0].name;
-                if (this.layer_properties[layerName]) {
-                    this.layer_properties[layerName].layer_collapsed = false;
-                }
+nodeType.prototype.refreshUI = function() {
+    this.updateLayerWidgets();
+    const activeLayerKeys = Object.keys(this.layer_properties);
+    const activeLayers = new Set(activeLayerKeys);
+    
+    const baseAnchor = this.widgets.find(w => w.name === `header_anchor_1`);
+    if (baseAnchor) {
+        if (this.base_image_properties) {
+            baseAnchor.hidden = false;
+            baseAnchor.computeSize = (width) => [width, 64];
+            if (baseAnchor.canvas) {
+                this.drawHeaderCanvas(baseAnchor.canvas, 'base_image');
             }
-  
-            const activeLayers = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
-            for (let i = 1; i <= MAX_LAYERS; i++) {
-                const layerName = `layer_${i}`;
-                const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
-                if (!anchor) continue;
-                if (activeLayers.has(layerName)) {
-                    anchor.hidden = false;
-                    anchor.computeSize = (width) => [width, 64];
-                    if (anchor.canvas) {
-                        this.drawHeaderCanvas(anchor.canvas, layerName);
-                    }
-                    this.updateLayerVisibility(layerName);
-                } else {
-                    anchor.hidden = true;
-                    anchor.computeSize = () => [0, -4];
-                }
+        } else {
+            baseAnchor.hidden = true;
+            baseAnchor.computeSize = () => [0, -4];
+        }
+    }
+
+    for (let i = 2; i <= MAX_LAYERS; i++) {
+        const layerName = `layer_${i - 1}`;
+        const anchor = this.widgets.find(w => w.name === `header_anchor_${i}`);
+        if (!anchor) continue;
+        if (activeLayers.has(layerName)) {
+            anchor.hidden = false;
+            anchor.computeSize = (width) => [width, 64];
+            if (anchor.canvas) {
+                this.drawHeaderCanvas(anchor.canvas, layerName);
             }
-        if (this.toolbar) {
-          if (this.toolbar.activeTool === 'mask') {
+            this.updateLayerVisibility(layerName);
+        } else {
+            anchor.hidden = true;
+            anchor.computeSize = () => [0, -4];
+        }
+    }
+
+    if (!this.base_image_properties && activeLayerKeys.length === 1) {
+        const layerName = activeLayerKeys[0];
+        if (this.layer_properties[layerName]) {
+            this.layer_properties[layerName].layer_collapsed = false;
+            this.updateLayerVisibility(layerName);
+        }
+    }
+
+    if (this.toolbar) {
+        if (this.toolbar.activeTool === 'mask') {
             this.toolbar.maskManager.show();
         } else {
             this.toolbar.maskManager.hide();
         }
     }
-            
-			this.updatePropertiesJSON();
-            resizeHeight.call(this);
-        };
+    
+    this.updatePropertiesJSON();
+    resizeHeight.call(this);
+};
         
-        nodeType.prototype.moveLayer = function(layer_index, direction) {
-            const swap_index = direction === "up" ? layer_index - 1 : layer_index + 1;
-            const name_A = `layer_${layer_index}`;
-            const name_B = `layer_${swap_index}`;
-            const mask_name_A = name_A.replace("layer_", "mask_");
-            const mask_name_B = name_B.replace("layer_", "mask_");
-            const input_A = this.inputs.find(i => i.name === name_A);
-            const input_B = this.inputs.find(i => i.name === name_B);
-            const mask_input_A = this.inputs.find(i => i.name === mask_name_A);
-            const mask_input_B = this.inputs.find(i => i.name === mask_name_B);
-            
-            if (!input_A || !input_B) return;
-            
-            [input_A.link, input_B.link] = [input_B.link, input_A.link];
-            if (mask_input_A && mask_input_B) { [mask_input_A.link, mask_input_B.link] = [mask_input_B.link, mask_input_A.link]; }
-            
-            const props_A = this.layer_properties[name_A];
-            this.layer_properties[name_A] = this.layer_properties[name_B]; this.layer_properties[name_B] = props_A;
-            
-            const img_A = this.loaded_preview_images[name_A];
-            this.loaded_preview_images[name_A] = this.loaded_preview_images[name_B]; this.loaded_preview_images[name_B] = img_A;
-            
-            const mask_img_A = this.loaded_preview_images[mask_name_A];
-            this.loaded_preview_images[mask_name_A] = this.loaded_preview_images[mask_name_B]; this.loaded_preview_images[mask_name_B] = mask_img_A;
-            
-            if (this.preview_data) {
-                const layer_data_A = this.preview_data[name_A];
-                this.preview_data[name_A] = this.preview_data[name_B];
-                this.preview_data[name_B] = layer_data_A;
-                
-                const mask_data_A = this.preview_data[mask_name_A];
-                this.preview_data[mask_name_A] = this.preview_data[mask_name_B];
-                this.preview_data[mask_name_B] = mask_data_A;
-            }
-			
-            if (input_A.link !== null) this.graph.links[input_A.link].target_slot = this.inputs.indexOf(input_A);
-            if (input_B.link !== null) this.graph.links[input_B.link].target_slot = this.inputs.indexOf(input_B);
-            if (mask_input_A && mask_input_A.link !== null) this.graph.links[mask_input_A.link].target_slot = this.inputs.indexOf(mask_input_A);
-            if (mask_input_B && mask_input_B.link !== null) this.graph.links[mask_input_B.link].target_slot = this.inputs.indexOf(mask_input_B);
-            if (this.movingLayer === name_A) {
-                this.movingLayer = name_B;
-            } else if (this.movingLayer === name_B) {
-                this.movingLayer = name_A;
-            }
-            this.refreshUI();
-            this.redrawPreviewCanvas();
+nodeType.prototype.moveLayer = function(layer_index, direction) {
+    let layers_array = Object.entries(this.layer_properties).map(([name, props]) => {
+        const maskName = name.replace('layer_', 'mask_');
+        return {
+            name,
+            props,
+            preview_img: this.loaded_preview_images ? this.loaded_preview_images[name] : null,
+            preview_data: this.preview_data ? this.preview_data[name] : null,
+            mask_img: this.loaded_preview_images ? this.loaded_preview_images[maskName] : null,
+            mask_data: this.preview_data ? this.preview_data[maskName] : null
         };
+    });
+
+    const fromIndex = layers_array.findIndex(l => l.name === `layer_${layer_index}`);
+    if (fromIndex === -1) return;
+
+    const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
+    const element = layers_array.splice(fromIndex, 1)[0];
+    layers_array.splice(toIndex, 0, element);
+    this.layer_properties = {};
+    const old_loaded_preview_images = this.loaded_preview_images || {};
+    const old_preview_data = this.preview_data || {};
+    this.loaded_preview_images = { base_image: old_loaded_preview_images['base_image'] };
+    this.preview_data = { base_image: old_preview_data['base_image'] };
+    layers_array.forEach((layer, index) => {
+        const newLayerName = `layer_${index + 1}`;
+        const newMaskName = `mask_${index + 1}`;
+        this.layer_properties[newLayerName] = layer.props;
+        if (layer.preview_img) this.loaded_preview_images[newLayerName] = layer.preview_img;
+        if (layer.preview_data) this.preview_data[newLayerName] = layer.preview_data;
+        if (layer.mask_img) this.loaded_preview_images[newMaskName] = layer.mask_img;
+        if (layer.mask_data) this.preview_data[newMaskName] = layer.mask_data;
+        if (this.movingLayer === layer.name) {
+            this.movingLayer = newLayerName;
+        }
+    });
+    this.updatePropertiesJSON();
+    this.refreshUI();
+    this.redrawPreviewCanvas();
+};
 nodeType.prototype.addLayerWidgets = function(layer_name) {
     if (!this.layer_properties[layer_name]) {
         this.layer_properties[layer_name] = {
@@ -1202,7 +1368,7 @@ nodeType.prototype.addLayerWidgets = function(layer_name) {
             rotation: 0.0,
             brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0, 
             invert_mask: false, color_section_collapsed: true, layer_collapsed: true,
-			internal_mask_filename: null,
+            internal_mask_filename: null,
             internal_mask_details: null,
         };
     }
@@ -1252,26 +1418,26 @@ nodeType.prototype.addLayerWidgets = function(layer_name) {
     }
 };
         
-        nodeType.prototype.updateLayerWidgets = function() {
-            this.widgets = this.widgets.filter(w => w.name.includes("_anchor") || w.name === "_properties_json");
-            const connectedInputs = this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null);
-            connectedInputs.sort((a, b) => parseInt(a.name.split("_")[1]) - parseInt(b.name.split("_")[1]));
-            
-            const existingWidgets = new Set();
-            for(const w of this.widgets) {
-                if (w.name.startsWith('blend_mode_')) existingWidgets.add(w.name.replace('blend_mode_', ''));
-            }
-            for (const input of connectedInputs) {
-                if (!existingWidgets.has(input.name)) {
-                   this.addLayerWidgets(input.name);
-                }
-            }
-        };
+nodeType.prototype.updateLayerWidgets = function() {
+    this.widgets = this.widgets.filter(w => 
+        w.name.includes("_anchor") || 
+        w.name === "_properties_json" ||
+        w.name === "Add Image" ||
+        w.name === "global_top_spacer"
+    );
+    
+    const activeLayerKeys = Object.keys(this.layer_properties);
+    activeLayerKeys.sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
+    
+    for (const layerName of activeLayerKeys) {
+        this.addLayerWidgets(layerName);
+    }
+};
+
 nodeType.prototype.handleDisconnectedInputs = function() {
     const connected_layer_names = new Set(this.inputs.filter(i => i.name.startsWith("layer_") && i.link !== null).map(i => i.name));
     const inputs_to_remove = [];
     const props_to_remove = [];
-
     for (const key in this.layer_properties) {
         if (!connected_layer_names.has(key)) {
             props_to_remove.push(key);
@@ -1281,14 +1447,12 @@ nodeType.prototype.handleDisconnectedInputs = function() {
             if(mask_input) inputs_to_remove.push(mask_input);
         }
     }
-
     props_to_remove.forEach(key => delete this.layer_properties[key]);
     inputs_to_remove.sort((a,b) => this.inputs.indexOf(b) - this.inputs.indexOf(a)).forEach(i => this.removeInput(this.inputs.indexOf(i)));
     
     const final_props = {};
     const final_images = {};
     const final_data = {};
-
     for (const key in this.loaded_preview_images) {
         if (!key.startsWith("layer_") && !key.startsWith("mask_")) {
             final_images[key] = this.loaded_preview_images[key];
@@ -1304,13 +1468,11 @@ nodeType.prototype.handleDisconnectedInputs = function() {
     
     const remaining_layers = this.inputs.filter(i => i.name.startsWith("layer_"));
     remaining_layers.sort((a, b) => this.inputs.indexOf(a) - this.inputs.indexOf(b));
-
     remaining_layers.forEach((input, i) => {
         const old_name = input.name;
         const new_name = `layer_${i + 1}`;
         const old_mask_name = old_name.replace("layer_", "mask_");
         const new_mask_name = new_name.replace("layer_", "mask_");
-
         if (this.layer_properties[old_name]) {
             final_props[new_name] = this.layer_properties[old_name];
         }
@@ -1321,31 +1483,27 @@ nodeType.prototype.handleDisconnectedInputs = function() {
         if (this.loaded_preview_images[old_mask_name]) {
             final_images[new_mask_name] = this.loaded_preview_images[old_mask_name];
         }
-
         if (this.preview_data && this.preview_data[old_name]) {
             final_data[new_name] = this.preview_data[old_name];
         }
         if (this.preview_data && this.preview_data[old_mask_name]) {
             final_data[new_mask_name] = this.preview_data[old_mask_name];
         }
-
         input.name = new_name;
         const mask_input = this.inputs.find(m => m.name === old_mask_name);
         if (mask_input) {
             mask_input.name = new_mask_name;
         }
     });
-
     this.layer_properties = final_props;
     this.loaded_preview_images = final_images;
     this.preview_data = final_data;
-	
+    
     const finalLayerNames = Object.keys(this.layer_properties);
     if (finalLayerNames.length > 0) {
         const isAnyLayerExpanded = finalLayerNames.some(name =>
             !this.layer_properties[name].layer_collapsed
         );
-
         if (!isAnyLayerExpanded) {
             this.layer_properties[finalLayerNames[0]].layer_collapsed = false;
         }
@@ -1363,11 +1521,154 @@ nodeType.prototype.handleDisconnectedInputs = function() {
                 this.addInput(`mask_${newIndex}`, "MASK");
             }
         };
-        
+ 
+nodeType.prototype.handleInternalImageLoad = function() {
+    if (Object.keys(this.layer_properties).length >= MAX_LAYERS) {
+        alert(`Maximum number of layers (${MAX_LAYERS}) reached.`);
+        return;
+    }
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/jpeg,image/png,image/webp';
+    fileInput.style.display = 'none';
+
+    fileInput.onchange = async (e) => {
+        if (!e.target.files.length) { document.body.removeChild(fileInput); return; }
+        const originalFile = e.target.files[0];
+
+        try {
+            let staticFilename;
+            const isBaseImage = !this.base_image_properties;
+
+            if (isBaseImage) {
+                staticFilename = "layersystem_base.png";
+            } else {
+                const timestamp = Date.now();
+                staticFilename = `layersystem_${timestamp}.png`;
+            }
+
+            const newFile = new File([originalFile], staticFilename, { type: originalFile.type });
+            const formData = new FormData();
+            formData.append('image', newFile);
+            formData.append('overwrite', 'true');
+            formData.append('type', 'input');
+
+            const response = await fetch('/upload/image', { method: 'POST', body: formData });
+            const data = await response.json();
+
+            if (isBaseImage) {
+                this.base_image_properties = { filename: data.name, details: data };
+            } else {
+                const existingIndices = new Set(Object.keys(this.layer_properties).map(k => parseInt(k.split('_')[1])));
+                let newIndex = 1;
+                while (existingIndices.has(newIndex)) { newIndex++; }
+                const layerName = `layer_${newIndex}`;
+
+                if (this.accordionMode) {
+                    for (const key in this.layer_properties) {
+                        this.layer_properties[key].layer_collapsed = true;
+                    }
+                }
+                this.layer_properties[layerName] = {
+                    source_filename: data.name,
+                    source_details: data,
+                    blend_mode: "normal", opacity: 1.0, enabled: true, resize_mode: "crop", scale: 1.0, offset_x: 0, offset_y: 0,
+                    rotation: 0.0, brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0,
+                    invert_mask: false, color_section_collapsed: true, layer_collapsed: false,
+                };
+            }
+            
+            this.updatePropertiesJSON();
+            this.refreshUI();
+            
+            setTimeout(() => {
+                app.queuePrompt();
+            }, 0);
+
+        } catch (error) {
+            console.error("Error uploading file:", error);
+        } finally {
+            document.body.removeChild(fileInput);
+        }
+    };
+    document.body.appendChild(fileInput);
+    fileInput.click();
+};
+
+nodeType.prototype.deleteLayer = function(layerNameToDelete) {
+    if (this.movingLayer === layerNameToDelete) {
+        this.movingLayer = null;
+    }
+
+    const layerToDeleteProps = this.layer_properties[layerNameToDelete];
+    if (layerToDeleteProps && layerToDeleteProps.source_details) {
+        const fileDetails = layerToDeleteProps.source_details;
+        const deleteFileOnServer = async (details) => {
+            try {
+                if (!details || !details.name) return;
+                await fetch("/layersystem/delete_file", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename: details.name, subfolder: details.subfolder }),
+                });
+            } catch (e) { console.error("Failed to delete file:", e); }
+        };
+        deleteFileOnServer(fileDetails);
+        if (layerToDeleteProps.internal_mask_details) deleteFileOnServer(layerToDeleteProps.internal_mask_details);
+        if (layerToDeleteProps.internal_preview_mask_details) deleteFileOnServer(layerToDeleteProps.internal_preview_mask_details);
+    }
+    
+    const layersToKeep = [];
+    const sortedKeys = Object.keys(this.layer_properties).sort((a, b) => parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+    
+    for (const name of sortedKeys) {
+        if (name !== layerNameToDelete) {
+            const maskName = name.replace('layer_', 'mask_');
+            layersToKeep.push({
+                props: JSON.parse(JSON.stringify(this.layer_properties[name])),
+                preview_img: this.loaded_preview_images[name],
+                preview_data: this.preview_data[name] ? JSON.parse(JSON.stringify(this.preview_data[name])) : undefined,
+                mask_img: this.loaded_preview_images[maskName],
+                mask_data: this.preview_data[maskName] ? JSON.parse(JSON.stringify(this.preview_data[maskName])) : undefined,
+            });
+        }
+    }
+
+    const new_layer_properties = {};
+    const new_loaded_preview_images = { base_image: this.loaded_preview_images.base_image };
+    const new_preview_data = { base_image: this.preview_data.base_image };
+
+    layersToKeep.forEach((layer, index) => {
+        const newLayerName = `layer_${index + 1}`;
+        const newMaskName = `mask_${index + 1}`;
+        new_layer_properties[newLayerName] = layer.props;
+        if (layer.preview_img) new_loaded_preview_images[newLayerName] = layer.preview_img;
+        if (layer.preview_data) new_preview_data[newLayerName] = layer.preview_data;
+        if (layer.mask_img) new_loaded_preview_images[newMaskName] = layer.mask_img;
+        if (layer.mask_data) new_preview_data[newMaskName] = layer.mask_data;
+    });
+    
+    this.layer_properties = new_layer_properties;
+    this.loaded_preview_images = new_loaded_preview_images;
+    this.preview_data = new_preview_data;
+
+    this.updatePropertiesJSON();
+    this.refreshUI();
+    this.redrawPreviewCanvas();
+};
+ 
+ nodeType.prototype.logFullState = function(label) {
+    console.log(`\n\n--- DEBUG STATE: ${label} ---`);
+    console.log("PROPRIÉTÉS DES CALQUES:", JSON.parse(JSON.stringify(this.layer_properties)));
+    console.log("DONNÉES DE PREVIEW:", this.preview_data);
+    console.log("--- FIN DEBUG STATE ---\n\n");
+};
+ 
 nodeType.prototype.updatePropertiesJSON = function() {
     const mainDataWidget = this.widgets.find(w => w.name === "_layer_system_data" || w.name === "_properties_json");
     if (mainDataWidget) {
         const full_properties = {
+            base: this.base_image_properties,
             layers: this.layer_properties,
             texts: this.toolbar ? this.toolbar.getTexts() : [],
             preview_width: this.previewCanvas ? this.previewCanvas.width : 512,
@@ -1383,4 +1684,4 @@ nodeType.prototype.updatePropertiesJSON = function() {
     });
    };
   },
-}); 
+});  

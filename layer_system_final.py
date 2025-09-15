@@ -12,8 +12,10 @@ import http.server
 import socketserver
 import threading
 import math
+import glob
 from rembg import remove, new_session
 
+# --- Configuration et chargement du modèle Rembg ---
 base_path = os.path.dirname(folder_paths.get_input_directory())
 rembg_dir = os.path.join(base_path, "models", "rembg")
 model_path = os.path.join(rembg_dir, "RMBG-1.4.pth")
@@ -26,6 +28,7 @@ else:
     print(f"[Layer System] INFO: Loading the high-performance model rmbg-1.4...")
     session = new_session(model_path=model_path)
 
+# --- Serveur de prévisualisation local ---
 preview_server_thread = None
 PREVIEW_SERVER_PORT = 8189
 
@@ -118,7 +121,8 @@ class LayerSystem:
     @classmethod
     def INPUT_TYPES(cls):
         header_anchors = {}
-        for i in range(1, 11):
+        # 1 ancre pour la base + 10 pour les calques = 11
+        for i in range(1, 12):
             header_anchors[f"header_anchor_{i}"] = ("STRING", {"multiline": True, "default": ""})
 
         optional_inputs = {
@@ -128,7 +132,7 @@ class LayerSystem:
         optional_inputs.update(header_anchors)
 
         return {
-            "required": { "base_image": ("IMAGE",), },
+            "required": {},
             "optional": optional_inputs
         }
 
@@ -155,82 +159,95 @@ class LayerSystem:
             return torch.where(top < 1e-6, torch.zeros_like(base), 1.0 - torch.clamp((1.0 - base) / (top + 1e-6), 0, 1))
         return top
 
-    def composite_layers(self, base_image, _properties_json="{}", **kwargs):
+    def composite_layers(self, _properties_json="{}", **kwargs):
+       # print(f"[Layer System DEBUG] JSON reçu par Python: {_properties_json}")
         start_preview_server()
-        final_image = base_image.clone()
-        previews_data = {}
-        temp_dir = folder_paths.get_temp_directory()
-        B, base_H, base_W, C = base_image.shape
-        
-        base_pil = tensor_to_pil(base_image)
-        base_filename = "layersys_base.png"
-        base_pil.save(os.path.join(temp_dir, base_filename))
-        previews_data["base_image"] = {
-          "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{base_filename}",
-          "filename": base_filename
-        }
-
-        if final_image.shape[-1] == 4:
-            final_image = final_image[..., :3]
 
         try:
             full_properties = json.loads(_properties_json)
         except json.JSONDecodeError:
             full_properties = {}
-        
-        layers_properties = full_properties.get("layers", {})
 
-        layers = {k: v for k, v in kwargs.items() if k.startswith("layer_")}
-        masks = {k: v for k, v in kwargs.items() if k.startswith("mask_")}
-        sorted_layer_names = sorted(layers.keys())
+        base_props = full_properties.get("base", {})
+        base_filename = base_props.get("filename")
+
+        if not base_filename:
+            print("[Layer System] AVERTISSEMENT: Aucune image de base chargée. Retour d'une image vide.")
+            return {"result": (torch.zeros(1, 512, 512, 3, dtype=torch.float32),)}
+
+        base_image_path = folder_paths.get_annotated_filepath(base_filename)
+        i = Image.open(base_image_path)
+        i = ImageOps.exif_transpose(i)
+        base_image = pil_to_tensor(i)
+        
+        final_image = base_image.clone()
+        
+        previews_data = {}
+        temp_dir = folder_paths.get_temp_directory()
+        B, base_H, base_W, C = base_image.shape
+
+        base_pil = tensor_to_pil(base_image)
+        base_preview_filename = "layersys_base.png"
+        base_pil.save(os.path.join(temp_dir, base_preview_filename))
+        previews_data["base_image"] = {
+            "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{base_preview_filename}",
+            "filename": base_filename
+        }
+
+        if final_image.shape[-1] == 4:
+            final_image = final_image[..., :3]
+
+        layers_properties = full_properties.get("layers", {})
+        sorted_layer_names = sorted(layers_properties.keys(), key=lambda x: int(x.split('_')[1]))
 
         for layer_name in sorted_layer_names:
-            layer_image_full = layers.get(layer_name)
-            if layer_image_full is None: continue
-            
-            layer_pil = tensor_to_pil(layer_image_full)
-            layer_filename = f"layersys_{layer_name}.png"
-            layer_pil.save(os.path.join(temp_dir, layer_filename))
-            previews_data[layer_name] = {
-               "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{layer_filename}",
-               "filename": layer_filename 
-            }
-
-            mask_name = layer_name.replace("layer_", "mask_")
-            mask = masks.get(mask_name)
-            
             props = layers_properties.get(layer_name, {})
+            
+            layer_filename = props.get("source_filename")
+            if not layer_filename:
+                continue
+            
+            layer_image_path = folder_paths.get_annotated_filepath(layer_filename)
+            i_layer = Image.open(layer_image_path)
+            i_layer = ImageOps.exif_transpose(i_layer)
+            layer_image_full = pil_to_tensor(i_layer)
 
-            if mask is None:
-                internal_mask_filename = props.get("internal_mask_filename")
-                if internal_mask_filename:
-                    image_path = os.path.join(folder_paths.get_input_directory(), internal_mask_filename)
-                    if os.path.exists(image_path):
-                        try:
-                            i = Image.open(image_path)
-                            i = ImageOps.exif_transpose(i)
-                            mask = pil_to_tensor(i) 
-                            if mask.shape[-1] > 1:
-                                if mask.shape[-1] == 4:
-                                    mask = mask[..., 3:4]
-                                else:
-                                    mask = mask[..., 0:1]
-                            mask = 1.0 - mask 
-                        except Exception as e:
-                            print(f"[Layer System] ERROR: Unable to load internal mask '{internal_mask_filename}': {e}")
-                    else:
-                        print(f"[Layer System] WARNING: Internal mask file not found: {image_path}")
+            layer_pil = tensor_to_pil(layer_image_full)
+            layer_preview_filename_temp = f"layersys_{layer_name}.png"
+            layer_pil.save(os.path.join(temp_dir, layer_preview_filename_temp))
+            previews_data[layer_name] = {
+               "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{layer_preview_filename_temp}",
+               "filename": layer_filename
+            }
+            
+            mask = None
+            internal_mask_filename = props.get("internal_mask_filename")
+            if internal_mask_filename:
+                image_path = folder_paths.get_annotated_filepath(internal_mask_filename)
+                if os.path.exists(image_path):
+                    try:
+                        i = Image.open(image_path)
+                        i = ImageOps.exif_transpose(i)
+                        mask = pil_to_tensor(i)
+                        if mask.shape[-1] > 1:
+                            if mask.shape[-1] == 4:
+                                mask = mask[..., 3:4]
+                            else:
+                                mask = mask[..., 0:1]
+                        mask = 1.0 - mask
+                    except Exception as e:
+                        print(f"[Layer System] ERROR: Unable to load internal mask '{internal_mask_filename}': {e}")
+                else:
+                    print(f"[Layer System] WARNING: Internal mask file not found: {image_path}")
             if mask is not None:
-                mask_for_preview = mask
-                if mask_for_preview.dim() == 3:
-                    mask_for_preview = mask_for_preview.unsqueeze(-1)
-                mask_for_preview_rgb = mask_for_preview.repeat(1, 1, 1, 3)
-                mask_pil = tensor_to_pil(mask_for_preview_rgb)
-                mask_filename = f"layersys_{mask_name}.png"
-                mask_pil.save(os.path.join(temp_dir, mask_filename))
+                mask_name = layer_name.replace("layer_", "mask_")
+                mask_preview_filename_temp = f"layersys_{mask_name}.png"
+                mask_pil_for_preview = tensor_to_pil(mask) # On ré-inverse pour l'affichage
+                mask_pil_for_preview.convert("RGB").save(os.path.join(temp_dir, mask_preview_filename_temp))
+        
                 previews_data[mask_name] = {
-                  "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{mask_filename}",
-                  "filename": mask_filename
+                "url": f"http://127.0.0.1:{PREVIEW_SERVER_PORT}/{mask_preview_filename_temp}",
+                "filename": internal_mask_filename 
                 }
             if not props.get("enabled", True): continue
 
@@ -411,6 +428,33 @@ class LayerSystem:
             pil_image.alpha_composite(text_canvas)
             
             final_image = pil_to_tensor(pil_image)
+        try:
+            active_files = set()
+
+            if base_props.get("source_filename"):
+                active_files.add(base_props["source_filename"])
+            elif base_props.get("filename"): 
+                active_files.add(base_props["filename"])
+    
+            for layer_name, props in layers_properties.items():
+                if props.get("source_filename"):
+                    active_files.add(props["source_filename"])
+                if props.get("internal_mask_filename"):
+                    active_files.add(props["internal_mask_filename"])
+                if props.get("internal_preview_mask_details"):
+                     active_files.add(props["internal_preview_mask_details"]["name"])
+
+            input_dir = folder_paths.get_input_directory()
+            disk_files = glob.glob(os.path.join(input_dir, "layersystem_*.png"))
+    
+            for file_path in disk_files:
+                filename = os.path.basename(file_path)
+                if filename not in active_files:
+                    print(f"[Layer System] Nettoyage : suppression du fichier orphelin {filename}")
+                    os.remove(file_path)
+
+        except Exception as e:
+            print(f"[Layer System] ERREUR pendant le nettoyage automatique : {e}")            
 
         return {
             "result": (final_image,),
@@ -436,9 +480,9 @@ async def remove_background_route(request):
         return web.Response(status=500, text=str(e))
 
 def process_remove_bg(filename, layer_index_str):
-    image_path = os.path.join(folder_paths.get_temp_directory(), filename)
+    image_path = folder_paths.get_annotated_filepath(filename)
     if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Image source non trouvée dans le dossier temp: {filename}")
+        raise FileNotFoundError(f"Image source non trouvée dans le dossier input: {filename}")
 
     input_image = Image.open(image_path)
     
@@ -461,8 +505,6 @@ def process_remove_bg(filename, layer_index_str):
 
     render_mask_image = ImageOps.invert(preview_mask_image.convert("L")).convert("RGB")
     
-    timestamp = int(time.time())
-    
     preview_mask_filename = f"internal_mask_preview_{layer_index_str}.png"
     preview_mask_path = os.path.join(folder_paths.get_input_directory(), preview_mask_filename)
     preview_mask_image.save(preview_mask_path)
@@ -475,6 +517,33 @@ def process_remove_bg(filename, layer_index_str):
         "preview_mask_details": { "name": preview_mask_filename, "subfolder": "", "type": "input" },
         "render_mask_details": { "name": render_mask_filename, "subfolder": "", "type": "input" }
     }
+    
+@server.PromptServer.instance.routes.post("/layersystem/delete_file")
+async def delete_file_route(request):
+    try:
+        post_data = await request.json()
+        filename = post_data.get("filename")
+        subfolder = post_data.get("subfolder", "")
+
+        if not filename:
+            return web.Response(status=400, text="Nom de fichier manquant")
+
+        input_dir = folder_paths.get_input_directory()
+        file_path = os.path.join(input_dir, subfolder, filename)
+        
+        if os.path.commonpath([input_dir]) != os.path.commonpath([input_dir, file_path]):
+            return web.Response(status=403, text="Accès interdit")
+
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"[Layer System] deleted file : {file_path}")
+            return web.json_response({"success": True, "message": f"file {filename} supprimé."})
+        else:
+            return web.json_response({"success": False, "message": "file not found."}, status=404)
+
+    except Exception as e:
+        print(f"[Layer System] ERREUR API delete_file: {e}")
+        return web.Response(status=500, text=str(e))
 
 NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }
 NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layer System" }
