@@ -7,9 +7,6 @@ This system is built to be intuitive, enabling complex composites directly withi
 -----
 
 
-https://github.com/user-attachments/assets/c585e9ac-3f82-436c-9098-2f506bbf60b9
-
-
 
 https://github.com/user-attachments/assets/26ae1586-7582-4a72-909d-0e59cdad9fa9
 
