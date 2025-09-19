@@ -544,6 +544,141 @@ async def delete_file_route(request):
     except Exception as e:
         print(f"[Layer System] ERREUR API delete_file: {e}")
         return web.Response(status=500, text=str(e))
+        
+@server.PromptServer.instance.routes.post("/layersystem/magic_wand")
+async def magic_wand_route(request):
+    try:
+        data = await request.json()
+        filename = data.get("filename")
+        start_x, start_y = data.get("x"), data.get("y")
+        tolerance = data.get("tolerance", 32)
+        contiguous = data.get("contiguous", True)
+
+        image_path = folder_paths.get_annotated_filepath(filename)
+        img_pil = Image.open(image_path).convert("RGB")
+
+        pixels = np.array(img_pil)
+        h, w, _ = pixels.shape
+
+        start_color = pixels[start_y, start_x].astype(np.float32)
+        pixels_float = pixels.astype(np.float32)
+
+        if contiguous:
+            mask = np.zeros((h, w), dtype=np.uint8)
+            q = [(start_y, start_x)]
+            visited = set([(start_y, start_x)])
+            while len(q) > 0:
+                y, x = q.pop(0)
+                color_diff = np.sqrt(np.sum((pixels_float[y, x] - start_color) ** 2))
+                if color_diff <= tolerance:
+                    mask[y, x] = 255
+                    for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < w and 0 <= ny < h and (ny, nx) not in visited:
+                            q.append((ny, nx))
+                            visited.add((ny, nx))
+        else:
+            color_diffs = np.sqrt(np.sum((pixels_float - start_color) ** 2, axis=2))
+            mask = (color_diffs <= tolerance).astype(np.uint8) * 255
+
+        mask_pil = Image.fromarray(mask, mode="L")
+        mask_timestamp = int(time.time() * 1000)
+        mask_filename = f"layersystem_mask_{mask_timestamp}.png"
+
+        output_dir = folder_paths.get_input_directory()
+        mask_pil.save(os.path.join(output_dir, mask_filename), "PNG")
+
+        return web.json_response({
+            "success": True, 
+            "mask_details": { "name": mask_filename, "subfolder": "", "type": "input" }
+        })
+        
+        
+
+    except Exception as e:
+        import traceback
+        print(f"[Layer System] ERREUR API magic_wand: {e}")
+        traceback.print_exc()
+        return web.Response(status=500, text=str(e))
+        
+@server.PromptServer.instance.routes.post("/layersystem/apply_mask")
+async def apply_mask_route(request):
+    try:
+        data = await request.json()
+        new_mask_details = data.get("new_mask_details")
+        existing_mask_filename = data.get("existing_mask_filename")
+        fusion_mode = data.get("fusion_mode", "add")
+        layer_index = data.get("layer_index")
+
+        if not new_mask_details or layer_index is None:
+            return web.Response(status=400, text="Données manquantes")
+
+        # 1. On charge le nouveau masque (de la baguette)
+        new_mask_path = folder_paths.get_annotated_filepath(new_mask_details.get("name"))
+        new_mask_pil = Image.open(new_mask_path).convert("L")
+
+        # 2. On prépare le masque existant pour la fusion
+        if existing_mask_filename:
+            fusion_source_filename = existing_mask_filename
+            if "_render_" in existing_mask_filename:
+                fusion_source_filename = existing_mask_filename.replace("_render_", "_preview_")
+            
+            existing_mask_path = folder_paths.get_annotated_filepath(fusion_source_filename)
+            
+            if os.path.exists(existing_mask_path):
+                existing_mask_pil_raw = Image.open(existing_mask_path)
+                if 'A' in existing_mask_pil_raw.getbands():
+                    alpha_channel = existing_mask_pil_raw.getchannel('A')
+                    existing_mask_pille = Image.fromarray((np.array(alpha_channel) > 128).astype(np.uint8) * 255)
+                    existing_mask_pil = ImageOps.invert(existing_mask_pille.convert("L")) 
+                else:
+                    existing_mask_pil = existing_mask_pil_raw.convert("L")
+            else:
+                # Si le fichier n'est pas trouvé, on crée un masque noir de la même taille que le nouveau
+                existing_mask_pil = Image.new("L", new_mask_pil.size, "black")
+        else:
+            # S'il n'y a pas de masque du tout, on crée un masque noir
+            existing_mask_pil = Image.new("L", new_mask_pil.size, "white")
+
+        # 3. On fait la fusion (maintenant, on a toujours deux masques à comparer)
+        if existing_mask_pil.size != new_mask_pil.size:
+            new_mask_pil = new_mask_pil.resize(existing_mask_pil.size, Image.LANCZOS)
+        
+        existing_arr = np.array(existing_mask_pil)
+        new_arr = np.array(new_mask_pil)
+        
+        if fusion_mode == "add": combined_arr = np.maximum(existing_arr, new_arr)
+        elif fusion_mode == "subtract": combined_arr = np.maximum(existing_arr - new_arr, 0)
+        elif fusion_mode == "intersect": combined_arr = np.minimum(existing_arr, new_arr)
+        else: combined_arr = np.maximum(existing_arr, new_arr)
+        
+        final_preview_pil = Image.fromarray(combined_arr, mode="L")
+        
+        # 4. Sauvegarde des 3 fichiers (inchangé)
+        output_dir = folder_paths.get_input_directory()
+        editor_filename = f"internal_mask_{layer_index}.png"
+        preview_filename = f"internal_mask_preview_{layer_index}.png"
+        render_filename = f"internal_mask_render_{layer_index}.png"
+        
+        final_render_pil = ImageOps.invert(final_preview_pil.convert("L")).convert("RGB")
+        
+        final_preview_pil.save(os.path.join(output_dir, editor_filename), "PNG")
+        final_preview_pil.save(os.path.join(output_dir, preview_filename), "PNG")
+        final_render_pil.save(os.path.join(output_dir, render_filename), "PNG")
+        
+        return web.json_response({
+            "success": True, 
+            "editor_mask_details": { "name": editor_filename, "subfolder": "", "type": "input" },
+            "preview_mask_details": { "name": preview_filename, "subfolder": "", "type": "input" },
+            "render_mask_details": { "name": render_filename, "subfolder": "", "type": "input" }
+        })
+
+    except Exception as e:
+        import traceback
+        print(f"[Layer System] ERREUR API apply_mask: {e}")
+        traceback.print_exc()
+        return web.Response(status=500, text=str(e))       
+        
 
 NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }
 NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layer System" }
