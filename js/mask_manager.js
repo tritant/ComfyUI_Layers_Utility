@@ -73,16 +73,6 @@ async getSourceImageForActiveLayer() {
     }
 }
     
-    getActiveLayer() {
-        if (!this.node.layer_properties) return null;
-        const openLayerName = Object.keys(this.node.layer_properties).find(name => this.node.layer_properties[name]?.layer_collapsed === false);
-        if (openLayerName) {
-            const layerIndex = parseInt(openLayerName.split("_")[1]);
-            return { name: openLayerName, index: layerIndex };
-        }
-        return null;
-    }
-
 hasActiveMask() {
     if (!this.activeLayer) {
         return false;
@@ -92,7 +82,7 @@ hasActiveMask() {
 }
 
     async handleCreateMask() {
-        this.activeLayer = this.getActiveLayer();
+        this.activeLayer = this.node.getActiveLayer();
         if (!this.activeLayer) return alert("Erreur : No active layer.");
         try {
             const sourceImage = await this.getSourceImageForActiveLayer();
@@ -116,7 +106,7 @@ hasActiveMask() {
     }
 
 async handleEditMask() {
-    this.activeLayer = this.getActiveLayer();
+    this.activeLayer = this.node.getActiveLayer();
     if (!this.activeLayer) return alert("Erreur : No active layer.");
     
     const layerProps = this.node.layer_properties[this.activeLayer.name];
@@ -228,7 +218,7 @@ async handleEditMask() {
     }
 }
     async handleMaskEditorClose(activeLayer) {
-        if (!activeLayer) activeLayer = this.getActiveLayer();
+        if (!activeLayer) activeLayer = this.node.getActiveLayer();
         if (!activeLayer) return;
         const returned_image = this.returned_image;
         if (!returned_image) return;
@@ -273,7 +263,7 @@ async handleEditMask() {
     }
     
     handleDeleteMask() {
-        this.activeLayer = this.getActiveLayer();
+        this.activeLayer = this.node.getActiveLayer();
         if (!this.activeLayer) return;
         const layerProps = this.node.layer_properties[this.activeLayer.name];
         if (layerProps && layerProps.internal_mask_filename) {
@@ -376,7 +366,7 @@ createContextualToolbar() {
     }
 
     show() {
-        this.activeLayer = this.getActiveLayer();
+        this.activeLayer = this.node.getActiveLayer();
         if (!this.activeLayer) { this.hide(); return; }
         this.updateToolbarState();
         const layerProps = this.node.layer_properties[this.activeLayer.name];

@@ -1,5 +1,6 @@
 import { MaskManager } from './mask_manager.js';
 import { RemoveBgManager } from './removebg.js';
+import { MagicWandManager } from './magic_wand_manager.js';
 
 const textIconPath = new Path2D("M5 4v2h5v12h4V6h5V4H5z");
 const maskIconPath = new Path2D("M2 2 H22 V22 H2 Z M12 12 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0");
@@ -68,8 +69,10 @@ export class Toolbar {
         this.clickTimeout = null;
         this.tools = [
             { name: 'text', icon: textIconPath, y: 9 },
-            { name: 'mask', icon: '🎭', y: 45 }
+            { name: 'mask', icon: '🎭', y: 45 },
+			{ name: 'magic_wand', icon: '🪄', y: 81 }
         ];
+		
         this.toolBounds = {};
         this.selectedTextObject = null;
         this.textEditTool = 'move';
@@ -86,9 +89,12 @@ export class Toolbar {
         
         this.maskManager = new MaskManager(this.node);
 		this.removeBgManager = new RemoveBgManager(this.node, this.maskManager);
+		this.magicWandManager = new MagicWandManager(this.node);
         
         this.setupColorPicker();
         this.createContextualToolbar();
+		this.selectionSubMenu = null; // Notre futur menu de sélection
+        this.createSelectionSubMenu();
     }
 createContextualToolbar() {
     ensureToolbarStyles();
@@ -204,6 +210,16 @@ createContextualToolbar() {
                 y: iconY_start, 
                 size: iconSize 
             };
+			
+	    const isActive = this.activeTool === tool.name || 
+        (tool.name === 'magic_wand' && this.selectionSubMenu?.style.display === 'flex');
+        
+        if (isActive) {
+            ctx.fillStyle = "rgba(255, 221, 255, 0.6)"; // Couleur de surbrillance
+            const padding = 2;
+            ctx.fillRect(iconX_start - padding, iconY_start - padding, iconSize + (padding * 2), iconSize + (padding * 2));
+        }
+			
             ctx.save();
              if (tool.icon instanceof Path2D) {
                 ctx.translate(iconX_start, iconY_start);
@@ -216,11 +232,11 @@ createContextualToolbar() {
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
-                if (this.activeTool === tool.name) {
+                /*if (this.activeTool === tool.name) {
                     ctx.fillStyle = "rgba(255, 221, 255, 0.6)";
                     const padding = 2;
                     ctx.fillRect(iconX_start - padding, iconY_start - padding, iconSize + (padding*2), iconSize + (padding*2));
-                }
+                }*/
                 
                 ctx.fillText(tool.icon, iconX_start + iconSize / 2, iconY_start + iconSize / 2);
             }
@@ -258,32 +274,67 @@ createContextualToolbar() {
         });
         ctx.restore();
     }
-    handleClick(e, mouseX, mouseY) {
-        const clickedTool = this.tools.find(tool => {
-            const bounds = this.toolBounds[tool.name];
-            if (!bounds) return false;
-            return mouseX >= bounds.x && mouseX < (bounds.x + bounds.size) &&
-                   mouseY >= bounds.y && mouseY < (bounds.y + bounds.size);
-        });
-        if (clickedTool) {
-            const toolName = clickedTool.name;
-            const isCurrentlyActive = this.activeTool === toolName;
-            this.activeTool = null;
-            this.hideContextualToolbar();
-            this.maskManager.hide();
-            if (!isCurrentlyActive) {
-                this.activeTool = toolName;
-            }
-            if (this.activeTool === 'mask') {
-                this.maskManager.show();
-            }
-            if (this.activeTool && this.node.movingLayer) {
-                this.node.movingLayer = null;
-            }
-            
-            this.node.refreshUI();
+	
+handleClick(e, mouseX, mouseY) {
+    const clickedTool = this.tools.find(tool => {
+        const bounds = this.toolBounds[tool.name];
+        if (!bounds) return false;
+        return mouseX >= bounds.x && mouseX < (bounds.x + bounds.size) &&
+               mouseY >= bounds.y && mouseY < (bounds.y + bounds.size);
+    });
+
+    if (clickedTool) {
+        const toolName = clickedTool.name;
+        //const isDeactivating = this.activeTool === toolName;
+		const isDeactivating = this.activeTool === toolName || 
+                             (toolName === 'magic_wand' && this.selectionSubMenu?.style.display === 'flex');
+
+        // --- Étape 1 : On nettoie systématiquement l'état précédent ---
+        this.activeTool = null;
+        this.maskManager.hide();
+        this.magicWandManager.hide();
+        if (this.selectionSubMenu) {
+            this.selectionSubMenu.style.display = 'none';
         }
+        // --- Étape 2 : On active le nouvel outil, SEULEMENT si ce n'était pas un clic pour désactiver ---
+        if (!isDeactivating) {
+            if (toolName !== 'magic_wand') {
+            this.activeTool = toolName;
+            }
+			
+
+            // On affiche l'interface correspondante
+            switch (toolName) {
+                case 'mask':
+                    this.maskManager.show();
+                    break;
+                case 'magic_wand':
+                    // Pour l'icône 🪄, "activer" signifie montrer le sous-menu
+                    if (this.selectionSubMenu) {
+                        this.selectionSubMenu.style.display = 'flex';
+                        // On positionne le sous-menu
+						this.positionSelectionSubMenu();
+                        //const bounds = this.toolBounds[toolName];
+                        //const canvasRect = this.node.previewCanvas.getBoundingClientRect();
+                        //this.selectionSubMenu.style.left = `${canvasRect.left + bounds.x + bounds.size}px`;
+                        //this.selectionSubMenu.style.top = `${canvasRect.top + bounds.y}px`;
+                    }
+
+                    break;
+                case 'text':
+                    // L'outil texte est juste actif, il n'a pas d'interface à afficher via cette fonction
+                    break;
+            }
+        }
+if (clickedTool || this.activeTool) {
+    this.node.movingLayer = null;
+
+}
+        //this.node.graph.setDirtyCanvas(true, true);
+        this.node.refreshUI();
     }
+}
+	
     handleCanvasClick(e) {
         if (this.activeTool !== 'text') {
             return;
@@ -454,6 +505,85 @@ handleDragEnd(e) {
         this.updateContextualToolbarPosition();
     }
 }
+
+createSelectionSubMenu() {
+    this.selectionSubMenu = document.createElement("div");
+    Object.assign(this.selectionSubMenu.style, {
+        position: 'fixed',
+        display: 'none',
+        zIndex: '10002',
+        backgroundColor: 'rgba(30, 30, 30, 0.9)',
+        border: '1px solid #555',
+        borderRadius: '8px',
+        padding: '4px',
+        //display: 'flex',
+        flexDirection: 'column',
+        gap: '4px',
+    });
+
+    // Petite fonction pour créer nos boutons-emojis
+    const createEmojiButton = (emoji, title) => {
+        const button = document.createElement("button");
+        button.innerText = emoji;
+        button.title = title;
+        Object.assign(button.style, {
+            backgroundColor: '#444',
+            color: 'white',
+            border: '1px solid #666',
+            padding: '0',
+            borderRadius: '5px',
+            cursor: 'pointer',
+            width: '26px',
+            height: '26px',
+            fontSize: '16px', // Taille de l'emoji
+            textAlign: 'center',
+            lineHeight: '26px', // Centre l'emoji verticalement
+        });
+        button.onmouseover = () => button.style.backgroundColor = '#5E5E5E';
+        button.onmouseout = () => button.style.backgroundColor = '#444';
+        return button;
+    };
+
+    // Bouton pour la Baguette Magique
+    const wandButton = createEmojiButton("🪄", "Baguette Magique");
+    wandButton.onclick = () => {
+        this.activeTool = 'magic_wand';
+        this.magicWandManager.show();
+        this.selectionSubMenu.style.display = 'none';
+		//if (this.node.movingLayer) this.node.movingLayer = null;
+		//this.node.refreshUI();
+    };
+
+    // Bouton pour la Sélection Rectangle
+    const rectButton = createEmojiButton("🔲", "Sélection Rectangle");
+    rectButton.onclick = () => {
+        console.log("Outil Rectangle sélectionné ! (non implémenté)");
+        this.activeTool = 'rectangle_select';
+        this.selectionSubMenu.style.display = 'none';
+		
+    };
+
+    this.selectionSubMenu.append(wandButton, rectButton);
+    document.body.appendChild(this.selectionSubMenu);
+}
+
+positionSelectionSubMenu() {
+    // On s'assure que le menu existe et est visible avant de faire quoi que ce soit
+    if (!this.selectionSubMenu || this.selectionSubMenu.style.display === 'none') {
+        return;
+    }
+
+    // On récupère la position de l'icône 🪄 sur laquelle on a cliqué
+    const bounds = this.toolBounds['magic_wand'];
+    if (!bounds || !this.node.previewCanvas) return;
+
+    const canvasRect = this.node.previewCanvas.getBoundingClientRect();
+    
+    // On positionne le sous-menu à côté de l'icône
+    this.selectionSubMenu.style.left = `${canvasRect.left + bounds.x + bounds.size}px`;
+    this.selectionSubMenu.style.top = `${canvasRect.top + bounds.y - 40}px`;
+}
+
 hideContextualToolbar() {
     this.selectedTextObject = null;
     this.contextualToolbar.style.display = 'none';
