@@ -15,7 +15,6 @@ import math
 import glob
 from rembg import remove, new_session
 
-# --- Configuration et chargement du modèle Rembg ---
 base_path = os.path.dirname(folder_paths.get_input_directory())
 rembg_dir = os.path.join(base_path, "models", "rembg")
 model_path = os.path.join(rembg_dir, "RMBG-1.4.pth")
@@ -28,7 +27,6 @@ else:
     print(f"[Layer System] INFO: Loading the high-performance model rmbg-1.4...")
     session = new_session(model_path=model_path)
 
-# --- Serveur de prévisualisation local ---
 preview_server_thread = None
 PREVIEW_SERVER_PORT = 8189
 
@@ -121,8 +119,7 @@ class LayerSystem:
     @classmethod
     def INPUT_TYPES(cls):
         header_anchors = {}
-        # 1 ancre pour la base + 10 pour les calques = 11
-        for i in range(1, 12):
+         for i in range(1, 12):
             header_anchors[f"header_anchor_{i}"] = ("STRING", {"multiline": True, "default": ""})
 
         optional_inputs = {
@@ -242,7 +239,7 @@ class LayerSystem:
             if mask is not None:
                 mask_name = layer_name.replace("layer_", "mask_")
                 mask_preview_filename_temp = f"layersys_{mask_name}.png"
-                mask_pil_for_preview = tensor_to_pil(mask) # On ré-inverse pour l'affichage
+                mask_pil_for_preview = tensor_to_pil(mask) 
                 mask_pil_for_preview.convert("RGB").save(os.path.join(temp_dir, mask_preview_filename_temp))
         
                 previews_data[mask_name] = {
@@ -382,7 +379,7 @@ class LayerSystem:
                 font_dirs.append("C:/Windows/Fonts")
             elif sys.platform == "darwin":
                 font_dirs.extend(["/System/Library/Fonts/Supplemental", "/Library/Fonts"])
-            else: # Linux
+            else: 
                 font_dirs.extend(["/usr/share/fonts/truetype/msttcorefonts", "/usr/share/fonts/truetype/dejavu"])
             
             def find_font_path(font_name):
@@ -450,7 +447,7 @@ class LayerSystem:
             for file_path in disk_files:
                 filename = os.path.basename(file_path)
                 if filename not in active_files:
-                    print(f"[Layer System] Nettoyage : suppression du fichier orphelin {filename}")
+                    print(f"[Layer System] Cleanup: Deleting the orphaned file {filename}")
                     os.remove(file_path)
 
         except Exception as e:
@@ -613,11 +610,9 @@ async def apply_mask_route(request):
         if not new_mask_details or layer_index is None:
             return web.Response(status=400, text="Données manquantes")
 
-        # 1. On charge le nouveau masque (de la baguette)
         new_mask_path = folder_paths.get_annotated_filepath(new_mask_details.get("name"))
         new_mask_pil = Image.open(new_mask_path).convert("L")
 
-        # 2. On prépare le masque existant pour la fusion
         if existing_mask_filename:
             fusion_source_filename = existing_mask_filename
             if "_render_" in existing_mask_filename:
@@ -634,13 +629,10 @@ async def apply_mask_route(request):
                 else:
                     existing_mask_pil = existing_mask_pil_raw.convert("L")
             else:
-                # Si le fichier n'est pas trouvé, on crée un masque noir de la même taille que le nouveau
                 existing_mask_pil = Image.new("L", new_mask_pil.size, "black")
         else:
-            # S'il n'y a pas de masque du tout, on crée un masque noir
             existing_mask_pil = Image.new("L", new_mask_pil.size, "white")
 
-        # 3. On fait la fusion (maintenant, on a toujours deux masques à comparer)
         if existing_mask_pil.size != new_mask_pil.size:
             new_mask_pil = new_mask_pil.resize(existing_mask_pil.size, Image.LANCZOS)
         
@@ -654,7 +646,6 @@ async def apply_mask_route(request):
         
         final_preview_pil = Image.fromarray(combined_arr, mode="L")
         
-        # 4. Sauvegarde des 3 fichiers (inchangé)
         output_dir = folder_paths.get_input_directory()
         editor_filename = f"internal_mask_{layer_index}.png"
         preview_filename = f"internal_mask_preview_{layer_index}.png"
@@ -681,4 +672,4 @@ async def apply_mask_route(request):
         
 
 NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }
-NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layer System" }
+NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layers System" }
