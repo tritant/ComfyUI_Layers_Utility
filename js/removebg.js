@@ -6,7 +6,7 @@ export class RemoveBgManager {
     }
 
 async performRemoveBg() {
-    const activeLayer = this.maskManager.getActiveLayer();
+    const activeLayer = this.node.getActiveLayer();
     if (!activeLayer) return;
     const layerIndex = activeLayer.index;
     const layerName = activeLayer.name;

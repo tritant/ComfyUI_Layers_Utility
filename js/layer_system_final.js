@@ -103,6 +103,12 @@ app.registerExtension({
         if (this.toolbar.contextualToolbar?.style.display !== 'none') {
             this.toolbar.updateContextualToolbarPosition();
         }
+		if (this.toolbar.magicWandManager?.contextualToolbar?.style.display !== 'none') {
+            this.toolbar.magicWandManager.positionToolbar();
+        }
+		if (this.toolbar.selectionSubMenu?.style.display !== 'none') {
+            this.toolbar.positionSelectionSubMenu();
+        }
     }
 };
         const onNodeCreated = nodeType.prototype.onNodeCreated;
@@ -119,6 +125,12 @@ app.registerExtension({
         }
         if (this.toolbar?.maskManager?.contextualToolbar) {
             this.toolbar.maskManager.contextualToolbar.remove();
+        }
+		if (this.toolbar.selectionSubMenu) {
+            this.toolbar.selectionSubMenu.remove();
+        }
+        if (this.toolbar.magicWandManager?.settingsToolbar) {
+            this.toolbar.magicWandManager.settingsToolbar.remove();
         }
     };
 			
@@ -175,6 +187,16 @@ this.widgets.push(topSpacer);
                     container.appendChild(canvas);
                     this.previewCanvas = canvas;
                     this.previewCtx = canvas.getContext("2d");
+					
+					const overlayCanvas = document.createElement("canvas");
+                    overlayCanvas.id = "ls-overlay-canvas";
+                    overlayCanvas.style.position = "absolute";
+                    overlayCanvas.style.top = "0";
+                    overlayCanvas.style.left = "0";
+                    overlayCanvas.style.pointerEvents = "none";
+                    container.appendChild(overlayCanvas);
+                    this.overlayCanvas = overlayCanvas;
+					
                     const anchorIndex = this.widgets.indexOf(anchorWidget);
                     if (anchorIndex > 0) {
                        this.widgets.splice(anchorIndex, 1);
@@ -184,6 +206,12 @@ this.widgets.push(topSpacer);
 this.previewCanvas.addEventListener('mousedown', (e) => {
     const mouseX = e.offsetX;
     const mouseY = e.offsetY;
+
+    if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
+        this.toolbar.handleClick(e, mouseX, mouseY);
+        return;
+    }
+
     if (this.textActionMode === 'moving' && this.activeTextObject) {
         const targetText = this.findTextElementAtPos(mouseX, mouseY);
         if (targetText && targetText.id === this.activeTextObject.id) {
@@ -197,15 +225,16 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         return;
     }
-    if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
-        this.toolbar.handleClick(e, mouseX, mouseY);
+
+    if (this.toolbar.activeTool === 'magic_wand' && this.toolbar.magicWandManager) {
+        this.toolbar.magicWandManager.handleCanvasClick(e);
         return;
     }
-    
     if (this.toolbar.activeTool) {
         this.toolbar.handleCanvasClick(e);
         return;
     }
+
     if (!this.movingLayer) return;
     const props = this.layer_properties[this.movingLayer];
     if (!props) return;
@@ -1004,7 +1033,7 @@ nodeType.prototype.initializeHeaderCanvases = function() {
                     } else if (isInDownArrow) {
                         const total_layers = Object.keys(this.layer_properties).length;
                         if (layer_index < total_layers) { this.moveLayer(layer_index, "down"); }
-                    } else if (isInMoveIcon && props.resize_mode === 'crop' && (!this.toolbar || !this.toolbar.activeTool)) {
+                    } else if (isInMoveIcon && props.resize_mode === 'crop' && !(this.toolbar && (this.toolbar.activeTool || this.toolbar.selectionSubMenu?.style.display === 'flex'))) {
                         if (this.movingLayer === layerName) {
                             this.movingLayer = null;
                         } else {
@@ -1142,10 +1171,13 @@ canvas.dataset.layerName = layerName;
     
     const moveIconY = topPadding + (thumbSize - moveIconSize) / 2;
     const isMoving = this.movingLayer === layerName;
+	const isMoveDisabled = props.resize_mode !== 'crop' || 
+          (this.toolbar && (this.toolbar.activeTool || this.toolbar.selectionSubMenu?.style.display === 'flex'));
     ctx.save();
     ctx.translate(moveIconX, moveIconY);
     ctx.scale(moveIconSize / 24, moveIconSize / 24);
-    ctx.strokeStyle = isMoving ? "#F44" : (props.resize_mode !== 'crop' || (this.toolbar && this.toolbar.activeTool) ? "#555" : LiteGraph.WIDGET_TEXT_COLOR);
+	
+	ctx.strokeStyle = isMoving ? "#F44" : (isMoveDisabled ? "#555" : LiteGraph.WIDGET_TEXT_COLOR);
     ctx.lineWidth = 2;
     ctx.stroke(moveIconPath);
     ctx.restore();
@@ -1432,6 +1464,17 @@ nodeType.prototype.updateLayerWidgets = function() {
     for (const layerName of activeLayerKeys) {
         this.addLayerWidgets(layerName);
     }
+};
+
+nodeType.prototype.getActiveLayer = function() {
+    if (!this.layer_properties) return null;
+    const openLayerName = Object.keys(this.layer_properties).find(name => this.layer_properties[name]?.layer_collapsed === false);
+    if (openLayerName) {
+        const layerIndex = parseInt(openLayerName.split("_")[1]);
+        const displayIndex = this.layer_order ? this.layer_order.indexOf(openLayerName) + 1 : layerIndex;
+        return { name: openLayerName, index: layerIndex, displayIndex: displayIndex };
+    }
+    return null;
 };
 
 nodeType.prototype.handleDisconnectedInputs = function() {
