@@ -126,10 +126,10 @@ app.registerExtension({
         if (this.toolbar?.maskManager?.contextualToolbar) {
             this.toolbar.maskManager.contextualToolbar.remove();
         }
-		if (this.toolbar.selectionSubMenu) { // Le sous-menu de choix d'outil
+		if (this.toolbar.selectionSubMenu) {
             this.toolbar.selectionSubMenu.remove();
         }
-        if (this.toolbar.magicWandManager?.settingsToolbar) { // La barre de réglages de la baguette
+        if (this.toolbar.magicWandManager?.settingsToolbar) {
             this.toolbar.magicWandManager.settingsToolbar.remove();
         }
     };
@@ -189,11 +189,11 @@ this.widgets.push(topSpacer);
                     this.previewCtx = canvas.getContext("2d");
 					
 					const overlayCanvas = document.createElement("canvas");
-                    overlayCanvas.id = "ls-overlay-canvas"; // On lui donne un ID
+                    overlayCanvas.id = "ls-overlay-canvas";
                     overlayCanvas.style.position = "absolute";
                     overlayCanvas.style.top = "0";
                     overlayCanvas.style.left = "0";
-                    overlayCanvas.style.pointerEvents = "none"; // Très important: pour que les clics passent à travers
+                    overlayCanvas.style.pointerEvents = "none";
                     container.appendChild(overlayCanvas);
                     this.overlayCanvas = overlayCanvas;
 					
@@ -207,14 +207,11 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
     const mouseX = e.offsetX;
     const mouseY = e.offsetY;
 
-    // PRIORITÉ N°1 : Le clic est-il sur une icône de la barre d'outils principale ?
-    // C'est la priorité absolue pour pouvoir changer d'outil à tout moment.
     if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
         this.toolbar.handleClick(e, mouseX, mouseY);
         return;
     }
 
-    // PRIORITÉ N°2 : Sommes-nous dans un mode d'action spécial (comme le déplacement de texte) ?
     if (this.textActionMode === 'moving' && this.activeTextObject) {
         const targetText = this.findTextElementAtPos(mouseX, mouseY);
         if (targetText && targetText.id === this.activeTextObject.id) {
@@ -229,18 +226,15 @@ this.previewCanvas.addEventListener('mousedown', (e) => {
         return;
     }
 
-    // PRIORITÉ N°3 : Un outil est-il actif pour un clic sur la zone de l'image ?
-    // Ici, on met la baguette magique, puis les autres outils.
     if (this.toolbar.activeTool === 'magic_wand' && this.toolbar.magicWandManager) {
         this.toolbar.magicWandManager.handleCanvasClick(e);
         return;
     }
-    if (this.toolbar.activeTool) { // Gère les autres outils comme le texte
+    if (this.toolbar.activeTool) {
         this.toolbar.handleCanvasClick(e);
         return;
     }
 
-    // PRIORITÉ N°4 : Si rien de tout ça, est-ce une action sur un calque (déplacement, etc.) ?
     if (!this.movingLayer) return;
     const props = this.layer_properties[this.movingLayer];
     if (!props) return;
@@ -1184,7 +1178,6 @@ canvas.dataset.layerName = layerName;
     ctx.scale(moveIconSize / 24, moveIconSize / 24);
 	
 	ctx.strokeStyle = isMoving ? "#F44" : (isMoveDisabled ? "#555" : LiteGraph.WIDGET_TEXT_COLOR);
-    //ctx.strokeStyle = isMoving ? "#F44" : (props.resize_mode !== 'crop' || (this.toolbar && this.toolbar.activeTool) ? "#555" : LiteGraph.WIDGET_TEXT_COLOR);
     ctx.lineWidth = 2;
     ctx.stroke(moveIconPath);
     ctx.restore();

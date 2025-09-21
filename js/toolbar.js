@@ -93,7 +93,7 @@ export class Toolbar {
         
         this.setupColorPicker();
         this.createContextualToolbar();
-		this.selectionSubMenu = null; // Notre futur menu de sélection
+		this.selectionSubMenu = null; 
         this.createSelectionSubMenu();
     }
 createContextualToolbar() {
@@ -215,7 +215,7 @@ createContextualToolbar() {
         (tool.name === 'magic_wand' && this.selectionSubMenu?.style.display === 'flex');
         
         if (isActive) {
-            ctx.fillStyle = "rgba(255, 221, 255, 0.6)"; // Couleur de surbrillance
+            ctx.fillStyle = "rgba(255, 221, 255, 0.6)"; 
             const padding = 2;
             ctx.fillRect(iconX_start - padding, iconY_start - padding, iconSize + (padding * 2), iconSize + (padding * 2));
         }
@@ -231,13 +231,6 @@ createContextualToolbar() {
                 ctx.font = `${iconSize}px sans-serif`;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                
-                /*if (this.activeTool === tool.name) {
-                    ctx.fillStyle = "rgba(255, 221, 255, 0.6)";
-                    const padding = 2;
-                    ctx.fillRect(iconX_start - padding, iconY_start - padding, iconSize + (padding*2), iconSize + (padding*2));
-                }*/
-                
                 ctx.fillText(tool.icon, iconX_start + iconSize / 2, iconY_start + iconSize / 2);
             }
             
@@ -285,44 +278,32 @@ handleClick(e, mouseX, mouseY) {
 
     if (clickedTool) {
         const toolName = clickedTool.name;
-        //const isDeactivating = this.activeTool === toolName;
 		const isDeactivating = this.activeTool === toolName || 
                              (toolName === 'magic_wand' && this.selectionSubMenu?.style.display === 'flex');
 
-        // --- Étape 1 : On nettoie systématiquement l'état précédent ---
         this.activeTool = null;
         this.maskManager.hide();
         this.magicWandManager.hide();
         if (this.selectionSubMenu) {
             this.selectionSubMenu.style.display = 'none';
         }
-        // --- Étape 2 : On active le nouvel outil, SEULEMENT si ce n'était pas un clic pour désactiver ---
+
         if (!isDeactivating) {
             if (toolName !== 'magic_wand') {
             this.activeTool = toolName;
             }
 			
-
-            // On affiche l'interface correspondante
             switch (toolName) {
                 case 'mask':
                     this.maskManager.show();
                     break;
                 case 'magic_wand':
-                    // Pour l'icône 🪄, "activer" signifie montrer le sous-menu
                     if (this.selectionSubMenu) {
                         this.selectionSubMenu.style.display = 'flex';
-                        // On positionne le sous-menu
 						this.positionSelectionSubMenu();
-                        //const bounds = this.toolBounds[toolName];
-                        //const canvasRect = this.node.previewCanvas.getBoundingClientRect();
-                        //this.selectionSubMenu.style.left = `${canvasRect.left + bounds.x + bounds.size}px`;
-                        //this.selectionSubMenu.style.top = `${canvasRect.top + bounds.y}px`;
                     }
-
                     break;
                 case 'text':
-                    // L'outil texte est juste actif, il n'a pas d'interface à afficher via cette fonction
                     break;
             }
         }
@@ -330,7 +311,6 @@ if (clickedTool || this.activeTool) {
     this.node.movingLayer = null;
 
 }
-        //this.node.graph.setDirtyCanvas(true, true);
         this.node.refreshUI();
     }
 }
@@ -516,12 +496,10 @@ createSelectionSubMenu() {
         border: '1px solid #555',
         borderRadius: '8px',
         padding: '4px',
-        //display: 'flex',
         flexDirection: 'column',
         gap: '4px',
     });
 
-    // Petite fonction pour créer nos boutons-emojis
     const createEmojiButton = (emoji, title) => {
         const button = document.createElement("button");
         button.innerText = emoji;
@@ -535,26 +513,22 @@ createSelectionSubMenu() {
             cursor: 'pointer',
             width: '26px',
             height: '26px',
-            fontSize: '16px', // Taille de l'emoji
+            fontSize: '16px',
             textAlign: 'center',
-            lineHeight: '26px', // Centre l'emoji verticalement
+            lineHeight: '26px',
         });
         button.onmouseover = () => button.style.backgroundColor = '#5E5E5E';
         button.onmouseout = () => button.style.backgroundColor = '#444';
         return button;
     };
 
-    // Bouton pour la Baguette Magique
     const wandButton = createEmojiButton("🪄", "Baguette Magique");
     wandButton.onclick = () => {
         this.activeTool = 'magic_wand';
         this.magicWandManager.show();
         this.selectionSubMenu.style.display = 'none';
-		//if (this.node.movingLayer) this.node.movingLayer = null;
-		//this.node.refreshUI();
     };
 
-    // Bouton pour la Sélection Rectangle
     const rectButton = createEmojiButton("🔲", "Sélection Rectangle");
     rectButton.onclick = () => {
         console.log("Outil Rectangle sélectionné ! (non implémenté)");
@@ -568,18 +542,15 @@ createSelectionSubMenu() {
 }
 
 positionSelectionSubMenu() {
-    // On s'assure que le menu existe et est visible avant de faire quoi que ce soit
     if (!this.selectionSubMenu || this.selectionSubMenu.style.display === 'none') {
         return;
     }
 
-    // On récupère la position de l'icône 🪄 sur laquelle on a cliqué
     const bounds = this.toolBounds['magic_wand'];
     if (!bounds || !this.node.previewCanvas) return;
 
     const canvasRect = this.node.previewCanvas.getBoundingClientRect();
     
-    // On positionne le sous-menu à côté de l'icône
     this.selectionSubMenu.style.left = `${canvasRect.left + bounds.x + bounds.size}px`;
     this.selectionSubMenu.style.top = `${canvasRect.top + bounds.y - 40}px`;
 }

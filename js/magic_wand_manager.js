@@ -3,8 +3,6 @@ export class MagicWandManager {
         this.node = node;
         this.contextualToolbar = null;
 		this.activeMaskPreview = null;
-        //this.lineDashOffset = 0;
-        // On stocke les réglages de l'outil ici
         this.settings = {
             tolerance: 32,
             contiguous: true,
@@ -109,7 +107,6 @@ showSelectionPreview(maskImage, props, layerImage) {
     overlay.height = preview.height;
     ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-    // --- Étape 1 : On crée l'image du surlignage, pixel par pixel ---
     const tempCanvas = document.createElement('canvas');
     const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
     tempCanvas.width = maskImage.naturalWidth;
@@ -119,17 +116,15 @@ showSelectionPreview(maskImage, props, layerImage) {
     const highlightData = tempCtx.createImageData(tempCanvas.width, tempCanvas.height);
 
     for (let i = 0; i < maskData.data.length; i += 4) {
-        if (maskData.data[i] > 128) { // Si le pixel du masque est blanc...
-            highlightData.data[i] = 255;     // R
-            highlightData.data[i + 1] = 0;   // G
-            highlightData.data[i + 2] = 0;   // B
-            highlightData.data[i + 3] = 102; // Alpha (opacité de 40%)
+        if (maskData.data[i] > 128) { 
+            highlightData.data[i] = 255;     
+            highlightData.data[i + 1] = 0;   
+            highlightData.data[i + 2] = 0;   
+            highlightData.data[i + 3] = 102; 
         }
     }
-    // On met notre surlignage rouge sur le canvas temporaire
-    tempCtx.putImageData(highlightData, 0, 0);
+     tempCtx.putImageData(highlightData, 0, 0);
 
-    // --- Étape 2 : On dessine ce surlignage avec les bonnes transformations ---
     const previewCanvasScale = this.node.previewCanvasScale || 1.0;
     const imageAreaCenterX = this.node.toolbar.width + (preview.width - this.node.toolbar.width) / 2;
     const imageAreaCenterY = preview.height / 2;
@@ -143,8 +138,7 @@ showSelectionPreview(maskImage, props, layerImage) {
     ctx.save();
     ctx.translate(centerX, centerY);
     ctx.rotate(angleRad);
-    
-    // On dessine notre canvas temporaire (qui contient le surlignage) avec les transformations
+   
     ctx.drawImage(tempCanvas, -transformedWidth / 2, -transformedHeight / 2, transformedWidth, transformedHeight);
     
     ctx.restore();
@@ -175,14 +169,13 @@ hideSelectionPreview() {
         Object.assign(this.contextualToolbar.style, {
             position: 'fixed',
             display: 'none',
-            top: '20px', // Position temporaire
-            left: '20px', // Position temporaire
+            top: '20px', 
+            left: '20px', 
             zIndex: '10001',
             backgroundColor: 'rgba(40, 40, 40, 0.9)',
             border: '1px solid #555',
             borderRadius: '8px',
             padding: '10px',
-            //display: 'flex',
             alignItems: 'center',
             gap: '6px',
             fontFamily: 'sans-serif',
@@ -190,7 +183,6 @@ hideSelectionPreview() {
             color: 'white',
         });
 
-        // --- Slider de Tolérance ---
         const toleranceLabel = document.createElement("label");
         toleranceLabel.innerText = "Tolerance :";
         const toleranceInput = document.createElement("input");
@@ -207,7 +199,6 @@ hideSelectionPreview() {
         toleranceValue.innerText = this.settings.tolerance;
         toleranceValue.style.minWidth = "25px";
 
-        // --- Case à cocher "Contigu" ---
         const contiguousLabel = document.createElement("label");
         contiguousLabel.innerText = "Contigu :";
         const contiguousInput = document.createElement("input");
@@ -234,7 +225,6 @@ hideSelectionPreview() {
         this.settings.fusionMode = e.target.value;
     };
 
-        // --- Bouton "Appliquer" ---
         const applyButton = document.createElement("button");
         applyButton.innerText = "Apply mask";
     applyButton.onclick = async () => {
@@ -249,7 +239,6 @@ hideSelectionPreview() {
         applyButton.disabled = true;
 
         try {
-            // 1. On transforme notre image de preview en un fichier temporaire sur le serveur
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = this.activeMaskPreview.naturalWidth;
             tempCanvas.height = this.activeMaskPreview.naturalHeight;
@@ -258,11 +247,9 @@ hideSelectionPreview() {
             const tempFile = new File([blob], `temp_selection_mask.png`, { type: "image/png" });
             const newMaskDetails = await this._uploadFile(tempFile, false);
 
-            // 2. On récupère le nom du masque déjà existant sur le calque
             const props = this.node.layer_properties[activeLayer.name];
             const existingMaskFilename = props.internal_mask_filename || null;
 
-            // 3. On appelle l'API Python pour fusionner les deux masques
             const response = await fetch("/layersystem/apply_mask", {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -276,15 +263,13 @@ hideSelectionPreview() {
 
             if (result.success && result.render_mask_details && result.preview_mask_details && result.editor_mask_details) {
             
-            // On met à jour les propriétés du calque avec les 3 nouveaux masques
-               props.internal_mask_filename = result.render_mask_details.name; // Le rendu final utilise le _render_
+               props.internal_mask_filename = result.render_mask_details.name; 
                props.internal_mask_details = result.render_mask_details;
                props.internal_preview_mask_details = result.preview_mask_details;
-               props.internal_editor_mask_details = result.editor_mask_details; // On pourrait stocker celui-ci aussi
+               props.internal_editor_mask_details = result.editor_mask_details; 
                props.mask_last_update = Date.now();
                this.node.updatePropertiesJSON();
 
-                // 5. On met à jour les previews dans l'interface
                 const finalMaskUrl = new URL('/view', window.location.origin);
                 finalMaskUrl.searchParams.set("filename", result.preview_mask_details.name);
                 finalMaskUrl.searchParams.set("type", "input");
@@ -309,31 +294,27 @@ hideSelectionPreview() {
         }
     };
 
-        // On assemble le tout
         this.contextualToolbar.append(
         toleranceLabel, toleranceInput, toleranceValue,
         contiguousLabel, contiguousInput,
-        modeLabel, modeSelect, // <-- On l'ajoute ici
+        modeLabel, modeSelect, 
         applyButton
         );
         document.body.appendChild(this.contextualToolbar);
     }
 
-    // Affiche et positionne la barre d'outils
     show() {
         if (!this.contextualToolbar) return;
         this.contextualToolbar.style.display = 'flex';
         this.positionToolbar();
     }
 
-    // Cache la barre d'outils
  hide() {
     if (!this.contextualToolbar) return;
     this.contextualToolbar.style.display = 'none';
-    this.hideSelectionPreview(); // On efface le surlignage quand on change d'outil
+    this.hideSelectionPreview();
 }
 
-    // Calcule la position idéale de la barre d'outils (en haut de la preview)
     positionToolbar() {
         if (!this.node.previewCanvas) return;
         const canvasRect = this.node.previewCanvas.getBoundingClientRect();
