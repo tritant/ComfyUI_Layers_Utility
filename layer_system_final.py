@@ -119,7 +119,7 @@ class LayerSystem:
     @classmethod
     def INPUT_TYPES(cls):
         header_anchors = {}
-         for i in range(1, 12):
+        for i in range(1, 12):
             header_anchors[f"header_anchor_{i}"] = ("STRING", {"multiline": True, "default": ""})
 
         optional_inputs = {
@@ -672,4 +672,5 @@ async def apply_mask_route(request):
         
 
 NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }
+
 NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layers System" }
