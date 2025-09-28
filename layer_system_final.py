@@ -668,7 +668,26 @@ async def apply_mask_route(request):
         import traceback
         print(f"[Layer System] ERREUR API apply_mask: {e}")
         traceback.print_exc()
-        return web.Response(status=500, text=str(e))       
+        return web.Response(status=500, text=str(e))  
+
+@server.PromptServer.instance.routes.post("/layersystem/refresh_previews")
+async def refresh_previews_route(request):
+    try:
+        post_data = await request.json()
+        properties_json = post_data.get("properties_json")
+        
+        # On crée une instance temporaire de la classe LayerSystem
+        layer_system_instance = LayerSystem()
+        
+        # On appelle la fonction de compositing pour obtenir les données de l'UI (qui contiennent les URL des previews)
+        # Mais on ignore le résultat de l'image, car on ne fait pas de rendu IA
+        ui_data = layer_system_instance.composite_layers(_properties_json=properties_json)
+        
+        # On renvoie uniquement les données de l'UI au frontend
+        return web.json_response(ui_data.get("ui", {}))
+    except Exception as e:
+        print(f"[Layer System] ERREUR API refresh_previews: {e}")
+        return web.Response(status=500, text=str(e))        
         
 
 NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }
