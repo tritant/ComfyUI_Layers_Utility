@@ -447,7 +447,7 @@ class LayerSystem:
             for file_path in disk_files:
                 filename = os.path.basename(file_path)
                 if filename not in active_files:
-                    print(f"[Layer System] Cleanup: Deleting the orphaned file {filename}")
+                    #print(f"[Layer System] Cleanup: Deleting the orphaned file {filename}")
                     os.remove(file_path)
 
         except Exception as e:
@@ -674,3 +674,4 @@ async def apply_mask_route(request):
 NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }
 
 NODE_DISPLAY_NAME_MAPPINGS = { "LayerSystem": "Layers System" }
+
