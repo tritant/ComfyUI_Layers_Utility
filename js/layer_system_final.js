@@ -786,6 +786,8 @@ nodeType.prototype.showTextContextMenu = function(clientX, clientY, textElement)
     setTimeout(() => document.addEventListener('mousedown', closeMenuHandler, true), 0);
 };
 nodeType.prototype.onCanvasMouseDown = function(e) {
+	
+
     const mouseX = e.offsetX;
     const mouseY = e.offsetY;
     if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
@@ -793,6 +795,7 @@ nodeType.prototype.onCanvasMouseDown = function(e) {
         return;
     }
 	
+
     if (this.toolbar.activeTool) {
         this.toolbar.handleCanvasClick(e);
         return;

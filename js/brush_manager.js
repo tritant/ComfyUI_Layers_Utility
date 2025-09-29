@@ -16,12 +16,37 @@ export class BrushManager {
     }
 
     createSettingsToolbar() {
+		
+        const styleId = 'ls-brush-toolbar-style';
+        if (!document.getElementById(styleId)) {
+            const style = document.createElement('style');
+            style.id = styleId;
+            // On définit le style de base des boutons et le style de surlignage
+           style.innerHTML = `
+                .ls-brush-toolbar button.ls-tool-button {
+                    border: 1px solid white;
+                    border-radius: 4px;
+                    background-color: transparent;
+                    transition: background-color 0.2s;
+                }
+                /* On spécifie que le survol ne s'applique QUE si le bouton n'est PAS actif */
+                .ls-brush-toolbar button.ls-tool-button:not(.active):hover {
+                    background-color: rgba(255, 255, 255, 0.1);
+                }
+                .ls-brush-toolbar button.active { 
+                    background-color: rgba(100, 180, 255, 0.4); 
+                }
+            `;
+            document.head.appendChild(style);
+        }
+		
         this.toolbar = document.createElement("div");
+		this.toolbar.className = 'ls-brush-toolbar';
         Object.assign(this.toolbar.style, {
             position: 'fixed', display: 'none', zIndex: '10002', 
             backgroundColor: 'rgba(40, 40, 40, 0.9)', border: '1px solid #555',
-            borderRadius: '8px', padding: '10px', alignItems: 'center',
-            gap: '8px', color: 'white'
+            borderRadius: '8px', padding: '8px', alignItems: 'center',
+            gap: '6px', color: 'white'
         });
         this.toolbar.innerHTML = `
             <label>Size:</label>
@@ -29,8 +54,9 @@ export class BrushManager {
             <span style="min-width: 25px;" data-value="size">${this.settings.size}</span>
             <label style="margin-left: 10px;">Color:</label>
             <input type="color" value="${this.settings.color}" data-setting="color">
-            <button data-mode="brush" title="Brush" style="border: 2px solid #00F;">🖌️</button>
-            <button data-mode="eraser" title="Eraser">Eraser</button>
+            <button data-tool="eyedropper" title="Pipette" class="ls-tool-button" style="width: 32px; height: 32px; padding: 2px; font-size: 18px;">💧</button>
+            <button data-mode="brush" title="Brush" class="ls-tool-button" style="width: 32px; height: 32px; font-size: 18px;">🖌️</button>
+            <button data-mode="eraser" title="Eraser" class="ls-tool-button" style="width: 32px; height: 32px; font-size: 18px;">🧼</button>
             <button data-action="apply" style="margin-left: 15px; background-color: #4CAF50; color: white; border: none; padding: 5px 10px; cursor: pointer;">Apply</button>
             <button data-action="cancel" style="margin-left: 5px; background-color: #f44336; color: white; border: none; padding: 5px 10px; cursor: pointer;">Cancel</button>
         `;
@@ -48,14 +74,57 @@ export class BrushManager {
         this.toolbar.addEventListener('click', (e) => {
             const target = e.target.closest('button');
             if (!target) return;
-            if (target.dataset.mode) {
-                this.settings.mode = target.dataset.mode;
-                this.toolbar.querySelectorAll('[data-mode]').forEach(b => b.style.border = 'none');
-                target.style.border = `2px solid ${this.settings.mode === 'brush' ? '#00F' : '#F00'}`;
-            }
+            
+            if (target.dataset.mode) this._updateToolState({ mode: target.dataset.mode });
+            if (target.dataset.tool === 'eyedropper') this._updateToolState({ tool: 'eyedropper' });
             if (target.dataset.action === 'apply') this.finalizeDrawing();
             if (target.dataset.action === 'cancel') this.hide();
         });
+    }
+	
+    _updateToolState({ mode = null, tool = null }) {
+        this.isEyedropperActive = (tool === 'eyedropper');
+        if (mode) {
+            this.settings.mode = mode;
+        }
+
+        if (this.isEyedropperActive) {
+            this.node.previewCanvas.style.cursor = 'copy';
+        } else {
+            this.node.previewCanvas.style.cursor = 'crosshair';
+        }
+
+        // On retire la classe active de tous les boutons-outils
+        this.toolbar.querySelectorAll('.ls-tool-button').forEach(b => b.classList.remove('active'));
+
+        // On ajoute la classe active au bon bouton
+        if (this.isEyedropperActive) {
+            this.toolbar.querySelector('[data-tool="eyedropper"]').classList.add('active');
+        } else {
+            this.toolbar.querySelector(`[data-mode="${this.settings.mode}"]`).classList.add('active');
+        }
+    }
+
+    // NOUVELLE FONCTION pour activer la pipette
+    activateEyedropper() {
+        this.isEyedropperActive = true;
+        //this.node.previewCanvas.style.cursor = 'copy';
+    }
+
+    // NOUVELLE FONCTION pour prendre la couleur
+    pickColor(e) {
+        const ctx = this.node.previewCanvas.getContext('2d', { willReadFrequently: true });
+        const pixelData = ctx.getImageData(e.offsetX, e.offsetY, 1, 1).data;
+        const hexColor = `#${("00" + pixelData[0].toString(16)).slice(-2)}${("00" + pixelData[1].toString(16)).slice(-2)}${("00" + pixelData[2].toString(16)).slice(-2)}`;
+
+        this.settings.color = hexColor;
+        this.toolbar.querySelector('input[data-setting="color"]').value = hexColor;
+        
+        this.isEyedropperActive = false;
+        this.settings.mode = 'brush';
+        //this.toolbar.querySelectorAll('[data-mode]').forEach(b => b.style.border = 'none');
+        //this.toolbar.querySelector('[data-mode="brush"]').style.border = '2px solid #00F';
+        this._updateToolState({ mode: 'brush' });
     }
 
     show() {
@@ -103,16 +172,23 @@ export class BrushManager {
         this.liveDrawingOverlay.addEventListener('mouseleave', this.boundHandleMouseEvent);
         
         this.toolbar.style.display = 'flex';
+		this._updateToolState({ mode: 'brush' });
         this.positionToolbar();
     }
 
-    hide() {
-        if (this.liveDrawingOverlay) {
-            this.liveDrawingOverlay.remove(); 
-            this.liveDrawingOverlay = null;
-            this.liveDrawingCtx = null;
-        }
+   hide() {
         this.toolbar.style.display = 'none';
+        
+    if (this.liveDrawingOverlay) { 
+	    this.liveDrawingOverlay.style.cursor = 'default';
+        this.liveDrawingOverlay.removeEventListener('mousedown', this.boundHandleMouseEvent);
+        this.liveDrawingOverlay.removeEventListener('mousemove', this.boundHandleMouseEvent);
+        this.liveDrawingOverlay.removeEventListener('mouseup', this.boundHandleMouseEvent);
+        this.liveDrawingOverlay.removeEventListener('mouseleave', this.boundHandleMouseEvent);
+		this.liveDrawingOverlay.remove(); 
+        this.liveDrawingOverlay = null;
+        this.liveDrawingCtx = null;
+   }
         if (this.node.toolbar.activeTool === 'brush') {
             this.node.toolbar.activeTool = null;
             this.node.refreshUI();
@@ -120,7 +196,7 @@ export class BrushManager {
     }
 
     handleMouseEvent(e) {
-		
+		this.liveDrawingOverlay.style.cursor = 'crosshair';
          // --- DÉBUT DE LA CORRECTION DU BLOCAGE DE LA TOOLBAR ---
         // On calcule où le clic a eu lieu par rapport au canvas principal qui est SOUS l'overlay
         const mainCanvasRect = this.node.previewCanvas.getBoundingClientRect();
@@ -138,6 +214,16 @@ export class BrushManager {
 		
         const activeLayer = this.node.getActiveLayer();
         if (!activeLayer) return;
+		
+         if (this.isEyedropperActive) {
+            this.liveDrawingOverlay.style.cursor = 'copy';
+            if (e.type === 'mousedown') {
+                this.pickColor(e);
+            }
+            return;
+        }
+
+		
         const props = this.node.layer_properties[activeLayer.name];
         const layerImage = this.node.loaded_preview_images[activeLayer.name];
         const preview = this.node.previewCanvas;
