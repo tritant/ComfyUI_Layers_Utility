@@ -1095,7 +1095,11 @@ nodeType.prototype.initializeHeaderCanvases = function() {
                                 props.layer_collapsed = true;
                             }
                         }
-                        
+ 
+                        if (this.toolbar.activeTool === 'brush') {
+                            this.toolbar.brushManager.show();
+                        }
+ 
                         this.refreshUI();
                     }
                     this.updatePropertiesJSON();

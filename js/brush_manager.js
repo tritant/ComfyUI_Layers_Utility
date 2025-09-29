@@ -59,6 +59,11 @@ export class BrushManager {
     }
 
     show() {
+		if (this.liveDrawingOverlay) {
+            this.liveDrawingOverlay.remove();
+            this.liveDrawingOverlay = null;
+            this.liveDrawingCtx = null;
+        }
         this.activeLayer = this.node.getActiveLayer();
         if (!this.activeLayer) {
             alert("Please select a layer to draw on.");
@@ -179,7 +184,7 @@ export class BrushManager {
     }
 
     draw(coords) {
-        this.finalDrawingCtx.beginPath();
+		this.finalDrawingCtx.beginPath();
         this.finalDrawingCtx.moveTo(this.lastPoint.x, this.lastPoint.y);
         this.finalDrawingCtx.lineTo(coords.x, coords.y);
         this.finalDrawingCtx.lineCap = 'round';
@@ -197,7 +202,6 @@ export class BrushManager {
 
     updatePreviewOverlay() {
         if (!this.liveDrawingCtx) return;
-        
         this.liveDrawingCtx.clearRect(0, 0, this.liveDrawingOverlay.width, this.liveDrawingOverlay.height);
         
         const props = this.node.layer_properties[this.activeLayer.name];
