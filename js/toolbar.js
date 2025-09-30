@@ -1,4 +1,5 @@
 import { MaskManager } from './mask_manager.js';
+import { BrushManager } from './brush_manager.js';
 import { RemoveBgManager } from './removebg.js';
 import { MagicWandManager } from './magic_wand_manager.js';
 
@@ -70,7 +71,8 @@ export class Toolbar {
         this.tools = [
             { name: 'text', icon: textIconPath, y: 9 },
             { name: 'mask', icon: '🎭', y: 45 },
-			{ name: 'magic_wand', icon: '🪄', y: 81 }
+			{ name: 'magic_wand', icon: '🪄', y: 81 },
+			{ name: 'brush', icon: '🖌️', y: 117 }
         ];
 		
         this.toolBounds = {};
@@ -90,6 +92,7 @@ export class Toolbar {
         this.maskManager = new MaskManager(this.node);
 		this.removeBgManager = new RemoveBgManager(this.node, this.maskManager);
 		this.magicWandManager = new MagicWandManager(this.node);
+		this.brushManager = new BrushManager(this.node);
         
         this.setupColorPicker();
         this.createContextualToolbar();
@@ -284,6 +287,7 @@ handleClick(e, mouseX, mouseY) {
         this.activeTool = null;
         this.maskManager.hide();
         this.magicWandManager.hide();
+		this.brushManager.hide();
         if (this.selectionSubMenu) {
             this.selectionSubMenu.style.display = 'none';
         }
@@ -303,8 +307,11 @@ handleClick(e, mouseX, mouseY) {
 						this.positionSelectionSubMenu();
                     }
                     break;
+                case 'brush':
+                        this.brushManager.show();
+                        break;
                 case 'text':
-                    break;
+                        break;
             }
         }
 if (clickedTool || this.activeTool) {

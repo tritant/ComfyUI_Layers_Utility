@@ -96,6 +96,9 @@ app.registerExtension({
         const onDrawBackground = nodeType.prototype.onDrawBackground;
         nodeType.prototype.onDrawBackground = function(ctx) {
         onDrawBackground?.apply(this, arguments);
+		if (this.toolbar && this.toolbar.activeTool === 'brush') {
+            this.toolbar.brushManager.positionToolbar();
+        }
         if (this.toolbar) {
         if (this.toolbar.maskManager?.contextualToolbar?.style.display !== 'none') {
             this.toolbar.maskManager.positionToolbar();
@@ -131,6 +134,9 @@ app.registerExtension({
         }
         if (this.toolbar.magicWandManager?.settingsToolbar) {
             this.toolbar.magicWandManager.settingsToolbar.remove();
+        }
+		if (this.toolbar?.brushManager?.toolbar) {
+            this.toolbar.brushManager.toolbar.remove();
         }
     };
 			
@@ -344,19 +350,19 @@ nodeType.prototype.loadStateFromConfig = function(info) {
                 const props = JSON.parse(info.widgets_values[jsonWidgetIndex]);
                 this.base_image_properties = props.base || null;
                 this.layer_properties = props.layers || {};
-                this.preview_data = props.preview_data || {};
+                //this.preview_data = props.preview_data || {};
                 if (this.toolbar) {
                     this.toolbar.textElements = props.texts || [];
                 } else {
                     this.loadedTextData = props.texts || [];
                 }
                 this.stateLoaded = true;
-                app.queuePrompt();
-                if (Object.keys(this.preview_data).length > 0) {
-                   this.loadAndRedrawPreviews();
-                } else {
+                //app.queuePrompt();
+                setTimeout(() => {
+                    this.refreshPreviewsOnly();
+                }, 100);
                    this.refreshUI();
-                }
+                
             } catch (e) {
                 console.error("[Layer System] Error loading JSON state", e);
                 this.refreshUI();
@@ -366,7 +372,33 @@ nodeType.prototype.loadStateFromConfig = function(info) {
         this.refreshUI();
     }
 };
+     
+nodeType.prototype.refreshPreviewsOnly = async function() {
+    const properties_widget = this.widgets.find(w => w.name === "_properties_json");
+    if (!properties_widget) return;
+
+    try {
+        const response = await fetch("/layersystem/refresh_previews", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ properties_json: properties_widget.value }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+
+        const ui_data = await response.json();
         
+        // On simule un message "executed" pour déclencher le rafraîchissement des images
+        if (ui_data.layer_previews) {
+            this.onExecuted({ layer_previews: ui_data.layer_previews });
+        }
+    } catch (e) {
+        console.error("[Layer System] Failed to refresh previews:", e);
+    }
+};
+	 
         const onConnectionsChange = nodeType.prototype.onConnectionsChange;
         nodeType.prototype.onConnectionsChange = function (side, slot, is_connected, link_info, io_slot) {
             onConnectionsChange?.apply(this, arguments);
@@ -488,7 +520,7 @@ nodeType.prototype.loadStateFromConfig = function(info) {
                 if (props.resize_mode === 'crop') {
                     const centerX = final_dx + final_dw / 2;
                     const centerY = final_dy + final_dh / 2;
-                    
+
                     ctx.save();
                     ctx.translate(centerX, centerY);
                     const angleInRadians = (props.rotation || 0) * Math.PI / 180;
@@ -754,12 +786,16 @@ nodeType.prototype.showTextContextMenu = function(clientX, clientY, textElement)
     setTimeout(() => document.addEventListener('mousedown', closeMenuHandler, true), 0);
 };
 nodeType.prototype.onCanvasMouseDown = function(e) {
+	
+
     const mouseX = e.offsetX;
     const mouseY = e.offsetY;
     if (this.toolbar.isClickOnToolbar(mouseX, mouseY)) {
         this.toolbar.handleClick(e, mouseX, mouseY);
         return;
     }
+	
+
     if (this.toolbar.activeTool) {
         this.toolbar.handleCanvasClick(e);
         return;
@@ -1062,7 +1098,11 @@ nodeType.prototype.initializeHeaderCanvases = function() {
                                 props.layer_collapsed = true;
                             }
                         }
-                        
+ 
+                        if (this.toolbar.activeTool === 'brush') {
+                            this.toolbar.brushManager.show();
+                        }
+ 
                         this.refreshUI();
                     }
                     this.updatePropertiesJSON();
@@ -1576,31 +1616,38 @@ nodeType.prototype.handleInternalImageLoad = function() {
     fileInput.style.display = 'none';
 
     fileInput.onchange = async (e) => {
-        if (!e.target.files.length) { document.body.removeChild(fileInput); return; }
+        if (!e.target.files.length) { 
+            document.body.removeChild(fileInput); 
+            return; 
+        }
         const originalFile = e.target.files[0];
 
         try {
-            let staticFilename;
             const isBaseImage = !this.base_image_properties;
+            const timestamp = Date.now();
+            const staticFilename = isBaseImage ? "layersystem_base.png" : `layersystem_${timestamp}.png`;
 
-            if (isBaseImage) {
-                staticFilename = "layersystem_base.png";
-            } else {
-                const timestamp = Date.now();
-                staticFilename = `layersystem_${timestamp}.png`;
-            }
+            // --- NOUVELLE LOGIQUE : CHARGEMENT LOCAL ---
+            // 1. On crée une URL locale temporaire pour l'image choisie
+            const localUrl = URL.createObjectURL(originalFile);
+            const newImage = new Image();
+            newImage.src = localUrl;
+            await new Promise(resolve => newImage.onload = resolve); // On attend que l'image soit chargée
+            // --- FIN DE LA NOUVELLE LOGIQUE ---
 
+            // On lance l'upload vers le serveur en arrière-plan
             const newFile = new File([originalFile], staticFilename, { type: originalFile.type });
             const formData = new FormData();
             formData.append('image', newFile);
             formData.append('overwrite', 'true');
             formData.append('type', 'input');
-
             const response = await fetch('/upload/image', { method: 'POST', body: formData });
-            const data = await response.json();
+            const data = await response.json(); // On récupère les infos du fichier sauvegardé
 
             if (isBaseImage) {
                 this.base_image_properties = { filename: data.name, details: data };
+                this.loaded_preview_images['base_image'] = newImage; // On met l'image chargée dans le cache
+                this.basePreviewImage = newImage;
             } else {
                 const existingIndices = new Set(Object.keys(this.layer_properties).map(k => parseInt(k.split('_')[1])));
                 let newIndex = 1;
@@ -1619,14 +1666,15 @@ nodeType.prototype.handleInternalImageLoad = function() {
                     rotation: 0.0, brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0,
                     invert_mask: false, color_section_collapsed: true, layer_collapsed: false,
                 };
+                this.loaded_preview_images[layerName] = newImage; // On met l'image chargée dans le cache
             }
             
             this.updatePropertiesJSON();
             this.refreshUI();
-            
-            setTimeout(() => {
-                app.queuePrompt();
-            }, 0);
+            this.redrawPreviewCanvas(); // On redessine l'aperçu localement
+
+            // On ne lance PAS de rendu backend
+            // app.queuePrompt();
 
         } catch (error) {
             console.error("Error uploading file:", error);
