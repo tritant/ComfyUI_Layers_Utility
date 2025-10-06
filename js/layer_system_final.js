@@ -99,6 +99,9 @@ app.registerExtension({
 		if (this.toolbar && this.toolbar.activeTool === 'brush') {
             this.toolbar.brushManager.positionToolbar();
         }
+		if (this.toolbar && this.toolbar.activeTool === 'mask_painter') {
+            this.toolbar.maskPainterManager.positionToolbar();
+        }
         if (this.toolbar) {
         if (this.toolbar.maskManager?.contextualToolbar?.style.display !== 'none') {
             this.toolbar.maskManager.positionToolbar();
@@ -137,6 +140,9 @@ app.registerExtension({
         }
 		if (this.toolbar?.brushManager?.toolbar) {
             this.toolbar.brushManager.toolbar.remove();
+        }
+		if (this.toolbar?.maskPainterManager?.toolbar) {
+            this.toolbar.maskPainterManager.toolbar.remove();
         }
     };
 			
@@ -439,6 +445,7 @@ nodeType.prototype.refreshPreviewsOnly = async function() {
             const sortedLayerNames = Object.keys(this.layer_properties).sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
             
             for (const layerName of sortedLayerNames) {
+				
                 const props = this.layer_properties[layerName];
                 const layerImage = this.loaded_preview_images[layerName];
                 const maskName = layerName.replace("layer_", "mask_");
