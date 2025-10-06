@@ -340,51 +340,55 @@ async finalizeDrawing() {
         };
     }
 
-    handleMouseEvent(e) {
-        if (!this.activeLayer) return;
+handleMouseEvent(e) {
+    if (!this.activeLayer) return;
 
     // --- DÉBUT DE LA CORRECTION ---
-    // On calcule la position du clic par rapport au canvas principal en dessous
+    // On calcule la position de la souris
     const mainCanvasRect = this.node.previewCanvas.getBoundingClientRect();
     const zoom = app.canvas.ds.scale || 1;
-    const clickX_on_main_canvas = (e.clientX - mainCanvasRect.left) / zoom;
-    const clickY_on_main_canvas = (e.clientY - mainCanvasRect.top) / zoom;
+    const mouseX = (e.clientX - mainCanvasRect.left) / zoom;
+    const mouseY = (e.clientY - mainCanvasRect.top) / zoom;
+    const isOverToolbar = this.node.toolbar.isClickOnToolbar(mouseX, mouseY);
 
-    // Si c'est un clic sur la barre d'outils principale, on lui passe l'événement et on s'arrête.
-    if (e.type === 'mousedown' && this.node.toolbar.isClickOnToolbar(clickX_on_main_canvas, clickY_on_main_canvas)) {
-        this.node.toolbar.handleClick(e, clickX_on_main_canvas, clickY_on_main_canvas);
-        return;
-    }
-    // --- FIN DE LA CORRECTION ---
-		
+    // Si la souris est sur la barre d'outils principale...
+    if (isOverToolbar) {
+        // On réaffiche le curseur normal de la souris
+        this.liveOverlay.style.cursor = 'default';
+        
+        // On met à jour l'aperçu SANS dessiner le curseur personnalisé (en passant 'null')
+        this.updateLivePreview(null);
+
+        // Si on clique, on passe l'événement à la barre d'outils et on s'arrête là
         if (e.type === 'mousedown') {
-            this.isDrawing = true;
-            const coords = this.getOriginalCoords(e);
-            this.lastPoint = coords;
-            this.drawStamp(coords);
-        } else if (e.type === 'mousemove') {
-            if (this.isDrawing) {
-                const coords = this.getOriginalCoords(e);
-                this.drawStroke(this.lastPoint, coords);
-                this.lastPoint = coords;
-            }
-        } else if (e.type === 'mouseup' || e.type === 'mouseleave') {
-            this.isDrawing = false;
+            this.node.toolbar.handleClick(e, mouseX, mouseY);
         }
-        this.updateLivePreview(e);
+        return; // On stoppe tout autre traitement
     }
     
-    drawStroke(from, to) {
-        const dist = Math.hypot(to.x - from.x, to.y - from.y);
-        const angle = Math.atan2(to.y - from.y, to.x - from.x);
-        const step = this.settings.size / 4;
-        for (let i = 0; i < dist; i += step) {
-            const x = from.x + (Math.cos(angle) * i);
-            const y = from.y + (Math.sin(angle) * i);
-            this.drawStamp({ x, y });
+    // Si on n'est PAS sur la barre d'outils, on cache le curseur normal
+    this.liveOverlay.style.cursor = 'none';
+    // --- FIN DE LA CORRECTION ---
+
+
+    if (e.type === 'mousedown') {
+        this.isDrawing = true;
+        const coords = this.getOriginalCoords(e);
+        this.lastPoint = coords;
+        this.drawStamp(coords);
+    } else if (e.type === 'mousemove') {
+        if (this.isDrawing) {
+            const coords = this.getOriginalCoords(e);
+            this.drawStroke(this.lastPoint, coords);
+            this.lastPoint = coords;
         }
-        this.drawStamp(to);
+    } else if (e.type === 'mouseup' || e.type === 'mouseleave') {
+        this.isDrawing = false;
     }
+    
+    // On passe l'événement pour que l'aperçu sache où dessiner le curseur personnalisé
+    this.updateLivePreview(e);
+}
     
     updateLivePreview(mouseEvent = null) {
         if (!this.liveCtx) return;
