@@ -21,33 +21,69 @@ export class MaskPainterManager {
 
     createSettingsToolbar() {
         if (this.toolbar) this.toolbar.remove();
+
+        const styleId = 'ls-mask-painter-style';
+        if (!document.getElementById(styleId)) {
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.innerHTML = `
+                .ls-mask-painter-toolbar .ls-tool-button {
+                    border: 1px solid white;
+                    background-color: transparent;
+                    color: white;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    transition: background-color 0.2s;
+                    font-size: 18px;
+                    width: 32px;
+                    height: 32px;
+                    padding: 2px;
+                }
+                .ls-mask-painter-toolbar .ls-tool-button:not(.active):hover {
+                    background-color: rgba(255, 255, 255, 0.15);
+                }
+                .ls-mask-painter-toolbar .ls-tool-button.active {
+                    background-color: rgba(100, 180, 255, 0.4);
+                    border-color: #64b4ff;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
         this.toolbar = document.createElement("div");
+        this.toolbar.className = 'ls-mask-painter-toolbar';
         Object.assign(this.toolbar.style, {
             position: 'fixed', display: 'none', zIndex: '10002',
             backgroundColor: 'rgba(40, 40, 40, 0.9)', border: '1px solid #555',
             borderRadius: '8px', padding: '8px', alignItems: 'center',
-            gap: '8px', color: 'white', fontFamily: 'sans-serif'
+            gap: '6px', color: 'white', fontFamily: 'sans-serif'
         });
 
+        // --- CORRECTION : On retire le curseur Opacity ---
         this.toolbar.innerHTML = `
             <label>Size:</label>
-            <input type="range" min="1" max="500" value="${this.settings.size}" data-setting="size" style="width: 80px;">
+            <input type="range" min="1" max="500" value="${this.settings.size}" data-setting="size" style="width: 70px;">
             <span style="min-width: 30px;" data-value="size">${this.settings.size}</span>
+
             <label style="margin-left: 10px;">Hardness:</label>
-            <input type="range" min="0" max="100" value="${this.settings.hardness}" data-setting="hardness" style="width: 80px;">
+            <input type="range" min="0" max="100" value="${this.settings.hardness}" data-setting="hardness" style="width: 70px;">
             <span style="min-width: 30px;" data-value="hardness">${this.settings.hardness}%</span>
-            <button data-mode="brush" title="Brush (Reveal)" style="font-size: 18px; border: 2px solid white; border-radius: 4px; background: black; color: white;">🖌️</button>
-            <button data-mode="eraser" title="Eraser (Hide)" style="font-size: 18px; border: 1px solid gray; border-radius: 4px; background: white; color: black;">🧼</button>
+
+            <button data-mode="brush" title="Brush (Reveal)" class="ls-tool-button">🖌️</button>
+            <button data-mode="eraser" title="Eraser (Hide)" class="ls-tool-button">🧼</button>
+
             <button data-action="apply" style="margin-left: 15px; background-color: #4CAF50; color: white; border: none; padding: 5px 10px; cursor: pointer;">Apply Mask</button>
             <button data-action="cancel" style="margin-left: 5px; background-color: #f44336; color: white; border: none; padding: 5px 10px; cursor: pointer;">Cancel</button>
         `;
         document.body.appendChild(this.toolbar);
+        
+        this.toolbar.querySelector('[data-mode="brush"]').classList.add('active');
 
         this.toolbar.addEventListener('input', (e) => {
             const setting = e.target.dataset.setting;
             if (setting) {
                 this.settings[setting] = parseInt(e.target.value, 10);
-                const suffix = setting === 'hardness' ? '%' : '';
+                const suffix = (setting === 'hardness') ? '%' : '';
                 this.toolbar.querySelector(`span[data-value="${setting}"]`).textContent = e.target.value + suffix;
             }
         });
@@ -55,11 +91,13 @@ export class MaskPainterManager {
         this.toolbar.addEventListener('click', (e) => {
             const target = e.target.closest('button');
             if (!target) return;
+
             if (target.dataset.mode) {
                 this.settings.mode = target.dataset.mode;
-                this.toolbar.querySelector('[data-mode="brush"]').style.border = `2px solid ${this.settings.mode === 'brush' ? 'white' : 'gray'}`;
-                this.toolbar.querySelector('[data-mode="eraser"]').style.border = `2px solid ${this.settings.mode === 'eraser' ? 'white' : 'gray'}`;
+                this.toolbar.querySelectorAll('.ls-tool-button').forEach(btn => btn.classList.remove('active'));
+                target.classList.add('active');
             }
+
             if (target.dataset.action === 'apply') this.finalizeDrawing();
             if (target.dataset.action === 'cancel') this.hide();
         });
