@@ -5,7 +5,8 @@ export class MaskPainterManager {
         this.lastPoint = { x: 0, y: 0 };
         this.settings = {
             size: 30,
-            hardness: 80, // Le retour de la dureté !
+            hardness: 80,
+            opacity: 100,			// Le retour de la dureté !
             mode: 'brush'
         };
 
@@ -19,89 +20,70 @@ export class MaskPainterManager {
         this.createSettingsToolbar();
     }
 
-    createSettingsToolbar() {
-        if (this.toolbar) this.toolbar.remove();
+createSettingsToolbar() {
+    if (this.toolbar) this.toolbar.remove();
 
-        const styleId = 'ls-mask-painter-style';
-        if (!document.getElementById(styleId)) {
-            const style = document.createElement('style');
-            style.id = styleId;
-            style.innerHTML = `
-                .ls-mask-painter-toolbar .ls-tool-button {
-                    border: 1px solid white;
-                    background-color: transparent;
-                    color: white;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    transition: background-color 0.2s;
-                    font-size: 18px;
-                    width: 32px;
-                    height: 32px;
-                    padding: 2px;
-                }
-                .ls-mask-painter-toolbar .ls-tool-button:not(.active):hover {
-                    background-color: rgba(255, 255, 255, 0.15);
-                }
-                .ls-mask-painter-toolbar .ls-tool-button.active {
-                    background-color: rgba(100, 180, 255, 0.4);
-                    border-color: #64b4ff;
-                }
-            `;
-            document.head.appendChild(style);
-        }
-
-        this.toolbar = document.createElement("div");
-        this.toolbar.className = 'ls-mask-painter-toolbar';
-        Object.assign(this.toolbar.style, {
-            position: 'fixed', display: 'none', zIndex: '10002',
-            backgroundColor: 'rgba(40, 40, 40, 0.9)', border: '1px solid #555',
-            borderRadius: '8px', padding: '8px', alignItems: 'center',
-            gap: '6px', color: 'white', fontFamily: 'sans-serif'
-        });
-
-        // --- CORRECTION : On retire le curseur Opacity ---
-        this.toolbar.innerHTML = `
-            <label>Size:</label>
-            <input type="range" min="1" max="500" value="${this.settings.size}" data-setting="size" style="width: 70px;">
-            <span style="min-width: 30px;" data-value="size">${this.settings.size}</span>
-
-            <label style="margin-left: 10px;">Hardness:</label>
-            <input type="range" min="0" max="100" value="${this.settings.hardness}" data-setting="hardness" style="width: 70px;">
-            <span style="min-width: 30px;" data-value="hardness">${this.settings.hardness}%</span>
-
-            <button data-mode="brush" title="Brush (Reveal)" class="ls-tool-button">🖌️</button>
-            <button data-mode="eraser" title="Eraser (Hide)" class="ls-tool-button">🧼</button>
-
-            <button data-action="apply" style="margin-left: 15px; background-color: #4CAF50; color: white; border: none; padding: 5px 10px; cursor: pointer;">Apply Mask</button>
-            <button data-action="cancel" style="margin-left: 5px; background-color: #f44336; color: white; border: none; padding: 5px 10px; cursor: pointer;">Cancel</button>
+    const styleId = 'ls-mask-painter-style';
+    if (!document.getElementById(styleId)) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.innerHTML = `
+            .ls-mask-painter-toolbar .ls-tool-button { border: 1px solid white; background-color: transparent; color: white; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; font-size: 18px; width: 32px; height: 32px; padding: 2px; }
+            .ls-mask-painter-toolbar .ls-tool-button:not(.active):hover { background-color: rgba(255, 255, 255, 0.15); }
+            .ls-mask-painter-toolbar .ls-tool-button.active { background-color: rgba(100, 180, 255, 0.4); border-color: #64b4ff; }
         `;
-        document.body.appendChild(this.toolbar);
-        
-        this.toolbar.querySelector('[data-mode="brush"]').classList.add('active');
-
-        this.toolbar.addEventListener('input', (e) => {
-            const setting = e.target.dataset.setting;
-            if (setting) {
-                this.settings[setting] = parseInt(e.target.value, 10);
-                const suffix = (setting === 'hardness') ? '%' : '';
-                this.toolbar.querySelector(`span[data-value="${setting}"]`).textContent = e.target.value + suffix;
-            }
-        });
-
-        this.toolbar.addEventListener('click', (e) => {
-            const target = e.target.closest('button');
-            if (!target) return;
-
-            if (target.dataset.mode) {
-                this.settings.mode = target.dataset.mode;
-                this.toolbar.querySelectorAll('.ls-tool-button').forEach(btn => btn.classList.remove('active'));
-                target.classList.add('active');
-            }
-
-            if (target.dataset.action === 'apply') this.finalizeDrawing();
-            if (target.dataset.action === 'cancel') this.hide();
-        });
+        document.head.appendChild(style);
     }
+
+    this.toolbar = document.createElement("div");
+    this.toolbar.className = 'ls-mask-painter-toolbar';
+    Object.assign(this.toolbar.style, {
+        position: 'fixed', display: 'none', zIndex: '10002',
+        backgroundColor: 'rgba(40, 40, 40, 0.9)', border: '1px solid #555',
+        borderRadius: '8px', padding: '8px', alignItems: 'center',
+        gap: '8px', color: 'white', fontFamily: 'sans-serif'
+    });
+
+    this.toolbar.innerHTML = `
+        <label>Size:</label>
+        <input type="range" min="1" max="500" value="${this.settings.size}" data-setting="size" style="width: 80px;">
+        <span style="min-width: 30px;" data-value="size">${this.settings.size}</span>
+        <label style="margin-left: 10px;">Hardness:</label>
+        <input type="range" min="0" max="100" value="${this.settings.hardness}" data-setting="hardness" style="width: 80px;">
+        <span style="min-width: 30px;" data-value="hardness">${this.settings.hardness}%</span>
+        <label style="margin-left: 10px;">Opacity:</label>
+        <input type="range" min="1" max="100" value="${this.settings.opacity}" data-setting="opacity" style="width: 80px;">
+        <span style="min-width: 30px;" data-value="opacity">${this.settings.opacity}%</span>
+        <button data-mode="brush" title="Brush (Reveal)" class="ls-tool-button">🖌️</button>
+        <button data-mode="eraser" title="Eraser (Hide)" class="ls-tool-button">🧼</button>
+        <button data-action="apply" style="margin-left: 15px; background-color: #4CAF50; color: white; border: none; padding: 5px 10px; cursor: pointer;">Apply Mask</button>
+        <button data-action="cancel" style="margin-left: 5px; background-color: #f44336; color: white; border: none; padding: 5px 10px; cursor: pointer;">Cancel</button>
+    `;
+    document.body.appendChild(this.toolbar);
+    
+    this.toolbar.querySelector('[data-mode="brush"]').classList.add('active');
+
+    this.toolbar.addEventListener('input', (e) => {
+        const setting = e.target.dataset.setting;
+        if (setting) {
+            this.settings[setting] = parseInt(e.target.value, 10);
+            const suffix = (setting === 'hardness' || setting === 'opacity') ? '%' : '';
+            this.toolbar.querySelector(`span[data-value="${setting}"]`).textContent = e.target.value + suffix;
+        }
+    });
+
+    this.toolbar.addEventListener('click', (e) => {
+        const target = e.target.closest('button');
+        if (!target) return;
+        if (target.dataset.mode) {
+            this.settings.mode = target.dataset.mode;
+            this.toolbar.querySelectorAll('.ls-tool-button').forEach(btn => btn.classList.remove('active'));
+            target.classList.add('active');
+        }
+        if (target.dataset.action === 'apply') this.finalizeDrawing();
+        if (target.dataset.action === 'cancel') this.hide();
+    });
+}
 
 async show() {
 	this.node.toolbar.activeTool = 'mask_painter';
@@ -192,37 +174,37 @@ async show() {
     this.positionToolbar();
 }
 
-    drawStamp(point) {
-        const ctx = this.maskCtx;
-        const radius = this.settings.size / 2;
-        const gradient = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
-        // La dureté (0-100) contrôle où le dégradé devient transparent
-        const hardnessStop = Math.max(0, Math.min(1, this.settings.hardness / 100));
-    
-        // Pinceau (Révéler) -> Peint de l'opaque avec 'source-over'
-        if (this.settings.mode === 'brush') {
-            gradient.addColorStop(0, 'white');
-            gradient.addColorStop(hardnessStop, 'white');
-            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.fillStyle = gradient;
-        
-        // Gomme (Cacher) -> Efface vers le transparent avec 'destination-out'
-        } else {
-            gradient.addColorStop(0, 'black'); // La couleur n'importe pas
-            gradient.addColorStop(hardnessStop, 'black');
-            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.fillStyle = gradient;
-        }
-        
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, radius, 0, 2 * Math.PI);
-        ctx.fill();
-        
-        ctx.globalCompositeOperation = 'source-over';
-    }
+drawStamp(point) {
+    const ctx = this.maskCtx;
+    const radius = this.settings.size / 2;
 
+    const gradient = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
+    const hardnessStop = Math.max(0, Math.min(1, this.settings.hardness / 100));
+
+    ctx.save();
+    ctx.globalAlpha = this.settings.opacity / 100;
+
+    if (this.settings.mode === 'brush') {
+        gradient.addColorStop(0, 'white');
+        gradient.addColorStop(hardnessStop, 'white');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        // On revient à 'lighter'
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = gradient;
+    } else { // La gomme reste correcte
+        gradient.addColorStop(0, 'black');
+        gradient.addColorStop(hardnessStop, 'black');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = gradient;
+    }
+    
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius, 0, 2 * Math.PI);
+    ctx.fill();
+    
+    ctx.restore();
+}
     hide() {
         if (this.activeLayer) {
             const props = this.node.layer_properties[this.activeLayer.name];
@@ -343,45 +325,50 @@ async finalizeDrawing() {
 handleMouseEvent(e) {
     if (!this.activeLayer) return;
 
-    // On calcule la position et on vérifie si on est sur la barre d'outils
+    // La gestion de la barre d'outils reste la même
     const mainCanvasRect = this.node.previewCanvas.getBoundingClientRect();
     const zoom = app.canvas.ds.scale || 1;
     const mouseX = (e.clientX - mainCanvasRect.left) / zoom;
     const mouseY = (e.clientY - mainCanvasRect.top) / zoom;
     const isOverToolbar = this.node.toolbar.isClickOnToolbar(mouseX, mouseY);
 
-    // CAS 1 : La souris est sur la barre d'outils principale
     if (isOverToolbar) {
-        this.liveOverlay.style.cursor = 'default'; // On montre le curseur normal
-        this.updateLivePreview(null); // On met à jour l'aperçu sans le curseur personnalisé
-
+        this.liveOverlay.style.cursor = 'default';
+        this.updateLivePreview(null);
         if (e.type === 'mousedown') {
             this.node.toolbar.handleClick(e, mouseX, mouseY);
         }
-        return; // On s'arrête ici
+        return;
     }
-
-    // CAS 2 : La souris est sur la zone de dessin
-    this.liveOverlay.style.cursor = 'none'; // On cache le curseur normal pour dessiner le nôtre
+    
+    this.liveOverlay.style.cursor = 'none';
 
     if (e.type === 'mousedown') {
         this.isDrawing = true;
         const coords = this.getOriginalCoords(e);
         this.lastPoint = coords;
-        this.drawStamp(coords);
+        this.drawStamp(coords); // On dessine le premier point
     } 
     else if (e.type === 'mousemove') {
         if (this.isDrawing) {
             const coords = this.getOriginalCoords(e);
-            this.drawStroke(this.lastPoint, coords);
-            this.lastPoint = coords;
+            
+            // --- TA SOLUTION : L'ESPACEMENT ---
+            const dist = Math.hypot(coords.x - this.lastPoint.x, coords.y - this.lastPoint.y);
+            const spacing = this.settings.size / 2; // On peut ajuster cette valeur
+
+            // On ne dessine un nouveau segment que si on a bougé suffisamment
+            if (dist >= spacing) {
+                this.drawStroke(this.lastPoint, coords);
+                this.lastPoint = coords; // On met à jour la position du dernier point DESSINÉ
+            }
+            // --- FIN DE LA SOLUTION ---
         }
     } 
     else if (e.type === 'mouseup' || e.type === 'mouseleave') {
         this.isDrawing = false;
     }
     
-    // On met à jour l'aperçu et le curseur personnalisé
     this.updateLivePreview(e);
 }
     
