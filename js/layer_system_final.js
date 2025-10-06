@@ -1012,9 +1012,9 @@ nodeType.prototype.initializeHeaderCanvases = function() {
         container.style.margin = "0px";
         
         canvas.addEventListener("mousedown", (e) => {
-			if (this.toolbar?.activeTool === 'mask_painter' && this.toolbar?.maskPainterManager) {
-                this.toolbar.maskPainterManager.hide();
-            }
+        if (this.toolbar?.activeTool === 'mask_painter' && this.toolbar?.maskPainterManager) {
+            this.toolbar.maskPainterManager.switchLayer();
+        }
             const layerName = e.currentTarget.dataset.layerName;
             if (!layerName) {
                 return;

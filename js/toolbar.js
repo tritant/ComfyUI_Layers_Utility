@@ -541,7 +541,7 @@ createSelectionSubMenu() {
 
 const paintMaskButton = createEmojiButton("🖌️", "Paint Mask"); // NOUVEAU
 paintMaskButton.onclick = () => {
-    this.activeTool = 'mask_painter';
+    //this.activeTool = 'mask_painter';
     if (this.maskPainterManager) {
         this.maskPainterManager.show();
     }

@@ -66,6 +66,7 @@ export class MaskPainterManager {
     }
 
 async show() {
+	this.node.toolbar.activeTool = 'mask_painter';
     this.activeLayer = this.node.getActiveLayer();
     if (!this.activeLayer) {
         alert("Please select a layer to paint a mask on.");
@@ -204,6 +205,16 @@ async show() {
         }
         this.node.refreshUI();
     }
+
+async switchLayer() {
+    this.hide();
+    
+    // On attend un tout petit peu pour laisser le temps à l'interface principale 
+    // de traiter le clic et de changer le calque actif.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    
+    this.show();
+}
 
 async finalizeDrawing() {
     const applyButton = this.toolbar.querySelector('[data-action="apply"]');
