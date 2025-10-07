@@ -21,7 +21,7 @@ export class BrushManager {
         if (!document.getElementById(styleId)) {
             const style = document.createElement('style');
             style.id = styleId;
-            // On définit le style de base des boutons et le style de surlignage
+
            style.innerHTML = `
                 .ls-brush-toolbar button.ls-tool-button {
                     border: 1px solid white;
@@ -29,7 +29,6 @@ export class BrushManager {
                     background-color: transparent;
                     transition: background-color 0.2s;
                 }
-                /* On spécifie que le survol ne s'applique QUE si le bouton n'est PAS actif */
                 .ls-brush-toolbar button.ls-tool-button:not(.active):hover {
                     background-color: rgba(255, 255, 255, 0.1);
                 }
@@ -94,10 +93,8 @@ export class BrushManager {
             this.node.previewCanvas.style.cursor = 'crosshair';
         }
 
-        // On retire la classe active de tous les boutons-outils
         this.toolbar.querySelectorAll('.ls-tool-button').forEach(b => b.classList.remove('active'));
 
-        // On ajoute la classe active au bon bouton
         if (this.isEyedropperActive) {
             this.toolbar.querySelector('[data-tool="eyedropper"]').classList.add('active');
         } else {
@@ -105,13 +102,10 @@ export class BrushManager {
         }
     }
 
-    // NOUVELLE FONCTION pour activer la pipette
     activateEyedropper() {
         this.isEyedropperActive = true;
-        //this.node.previewCanvas.style.cursor = 'copy';
     }
 
-    // NOUVELLE FONCTION pour prendre la couleur
     pickColor(e) {
         const ctx = this.node.previewCanvas.getContext('2d', { willReadFrequently: true });
         const pixelData = ctx.getImageData(e.offsetX, e.offsetY, 1, 1).data;
@@ -122,8 +116,6 @@ export class BrushManager {
         
         this.isEyedropperActive = false;
         this.settings.mode = 'brush';
-        //this.toolbar.querySelectorAll('[data-mode]').forEach(b => b.style.border = 'none');
-        //this.toolbar.querySelector('[data-mode="brush"]').style.border = '2px solid #00F';
         this._updateToolState({ mode: 'brush' });
     }
 
@@ -197,20 +189,15 @@ export class BrushManager {
 
     handleMouseEvent(e) {
 		this.liveDrawingOverlay.style.cursor = 'crosshair';
-         // --- DÉBUT DE LA CORRECTION DU BLOCAGE DE LA TOOLBAR ---
-        // On calcule où le clic a eu lieu par rapport au canvas principal qui est SOUS l'overlay
         const mainCanvasRect = this.node.previewCanvas.getBoundingClientRect();
         const zoom = app.canvas.ds.scale || 1;
         const clickX_on_main_canvas = (e.clientX - mainCanvasRect.left) / zoom;
         const clickY_on_main_canvas = (e.clientY - mainCanvasRect.top) / zoom;
 
-        // Si c'est un clic gauche (mousedown) ET qu'il est sur la zone de la barre d'outils...
         if (e.type === 'mousedown' && this.node.toolbar.isClickOnToolbar(clickX_on_main_canvas, clickY_on_main_canvas)) {
-            // ... on passe la main au gestionnaire de la barre d'outils.
             this.node.toolbar.handleClick(e, clickX_on_main_canvas, clickY_on_main_canvas);
-            return; // On arrête tout, on ne dessine pas.
+            return;
         }
-        // --- FIN DE LA CORRECTION DU BLOCAGE ---
 		
         const activeLayer = this.node.getActiveLayer();
         if (!activeLayer) return;
@@ -326,7 +313,6 @@ export class BrushManager {
             const finalCtx = finalCanvas.getContext('2d');
             finalCtx.drawImage(originalImage, 0, 0);
             
-            // On utilise bien la toile interne du manager, qui est maintenant nommée correctement
             finalCtx.drawImage(this.finalDrawingCanvas, 0, 0);
             
             const blob = await new Promise(resolve => finalCanvas.toBlob(resolve, 'image/png'));
