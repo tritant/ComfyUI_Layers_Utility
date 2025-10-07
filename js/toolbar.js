@@ -539,8 +539,9 @@ createSelectionSubMenu() {
         this.selectionSubMenu.style.display = 'none';
     };
 
-const paintMaskButton = createEmojiButton("🖌️", "Paint Mask");
-
+const paintMaskButton = createEmojiButton("🖌️", "Paint Mask"); // NOUVEAU
+paintMaskButton.onclick = () => {
+    //this.activeTool = 'mask_painter';
     if (this.maskPainterManager) {
         this.maskPainterManager.show();
     }
