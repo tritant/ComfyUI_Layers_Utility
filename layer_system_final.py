@@ -676,15 +676,12 @@ async def refresh_previews_route(request):
         post_data = await request.json()
         properties_json = post_data.get("properties_json")
         
-        # On crée une instance temporaire de la classe LayerSystem
         layer_system_instance = LayerSystem()
         
-        # On appelle la fonction de compositing pour obtenir les données de l'UI (qui contiennent les URL des previews)
-        # Mais on ignore le résultat de l'image, car on ne fait pas de rendu IA
         ui_data = layer_system_instance.composite_layers(_properties_json=properties_json)
         
-        # On renvoie uniquement les données de l'UI au frontend
         return web.json_response(ui_data.get("ui", {}))
+        
     except Exception as e:
         print(f"[Layer System] ERREUR API refresh_previews: {e}")
         return web.Response(status=500, text=str(e))  
@@ -710,15 +707,12 @@ async def finalize_painter_mask_route(request):
 
         output_dir = folder_paths.get_input_directory()
         
-        # --- CORRECTION : On retire le timestamp pour écraser les fichiers ---
         preview_filename = f"internal_mask_preview_{layer_index}.png"
         render_filename = f"internal_mask_render_{layer_index}.png"
-        # --- FIN CORRECTION ---
 
         preview_mask_pil.save(os.path.join(output_dir, preview_filename), "PNG")
         render_mask_pil.save(os.path.join(output_dir, render_filename), "PNG")
         
-        # On peut supprimer le fichier alpha temporaire qui ne sert plus à rien
         if os.path.exists(alpha_mask_path):
             os.remove(alpha_mask_path)
 
