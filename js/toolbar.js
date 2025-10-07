@@ -2,6 +2,7 @@ import { MaskManager } from './mask_manager.js';
 import { BrushManager } from './brush_manager.js';
 import { RemoveBgManager } from './removebg.js';
 import { MagicWandManager } from './magic_wand_manager.js';
+import { MaskPainterManager } from './mask_painter_manager.js';
 
 const textIconPath = new Path2D("M5 4v2h5v12h4V6h5V4H5z");
 const maskIconPath = new Path2D("M2 2 H22 V22 H2 Z M12 12 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0");
@@ -71,7 +72,7 @@ export class Toolbar {
         this.tools = [
             { name: 'text', icon: textIconPath, y: 9 },
             { name: 'mask', icon: '🎭', y: 45 },
-			{ name: 'magic_wand', icon: '🪄', y: 81 },
+			{ name: 'magic_wand', icon: '☯️', y: 81 },
 			{ name: 'brush', icon: '🖌️', y: 117 }
         ];
 		
@@ -93,6 +94,7 @@ export class Toolbar {
 		this.removeBgManager = new RemoveBgManager(this.node, this.maskManager);
 		this.magicWandManager = new MagicWandManager(this.node);
 		this.brushManager = new BrushManager(this.node);
+		this.maskPainterManager = new MaskPainterManager(this.node);
         
         this.setupColorPicker();
         this.createContextualToolbar();
@@ -288,6 +290,7 @@ handleClick(e, mouseX, mouseY) {
         this.maskManager.hide();
         this.magicWandManager.hide();
 		this.brushManager.hide();
+		this.maskPainterManager.hide();
         if (this.selectionSubMenu) {
             this.selectionSubMenu.style.display = 'none';
         }
@@ -536,15 +539,15 @@ createSelectionSubMenu() {
         this.selectionSubMenu.style.display = 'none';
     };
 
-    const rectButton = createEmojiButton("🔲", "Sélection Rectangle");
-    rectButton.onclick = () => {
-        console.log("Outil Rectangle sélectionné ! (non implémenté)");
-        this.activeTool = 'rectangle_select';
-        this.selectionSubMenu.style.display = 'none';
-		
-    };
+const paintMaskButton = createEmojiButton("🖌️", "Paint Mask");
 
-    this.selectionSubMenu.append(wandButton, rectButton);
+    if (this.maskPainterManager) {
+        this.maskPainterManager.show();
+    }
+    this.selectionSubMenu.style.display = 'none';
+};
+
+    this.selectionSubMenu.append(wandButton, paintMaskButton);
     document.body.appendChild(this.selectionSubMenu);
 }
 

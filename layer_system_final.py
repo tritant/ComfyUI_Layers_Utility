@@ -676,18 +676,57 @@ async def refresh_previews_route(request):
         post_data = await request.json()
         properties_json = post_data.get("properties_json")
         
-        # On crée une instance temporaire de la classe LayerSystem
         layer_system_instance = LayerSystem()
         
-        # On appelle la fonction de compositing pour obtenir les données de l'UI (qui contiennent les URL des previews)
-        # Mais on ignore le résultat de l'image, car on ne fait pas de rendu IA
         ui_data = layer_system_instance.composite_layers(_properties_json=properties_json)
         
-        # On renvoie uniquement les données de l'UI au frontend
         return web.json_response(ui_data.get("ui", {}))
+        
     except Exception as e:
         print(f"[Layer System] ERREUR API refresh_previews: {e}")
-        return web.Response(status=500, text=str(e))        
+        return web.Response(status=500, text=str(e))  
+
+@server.PromptServer.instance.routes.post("/layersystem/finalize_painter_mask")
+async def finalize_painter_mask_route(request):
+    try:
+        data = await request.json()
+        temp_alpha_mask_details = data.get("alpha_mask_details")
+        layer_index = data.get("layer_index")
+
+        if not temp_alpha_mask_details or layer_index is None:
+            return web.Response(status=400, text="Données manquantes")
+
+        alpha_mask_path = folder_paths.get_annotated_filepath(temp_alpha_mask_details["name"])
+        alpha_mask_pil = Image.open(alpha_mask_path)
+        alpha_channel = alpha_mask_pil.getchannel('A')
+
+        preview_mask_pil = Image.new("RGB", alpha_channel.size, "black")
+        preview_mask_pil.paste((255, 255, 255), mask=alpha_channel)
+
+        render_mask_pil = ImageOps.invert(preview_mask_pil.convert("L")).convert("RGB")
+
+        output_dir = folder_paths.get_input_directory()
+        
+        preview_filename = f"internal_mask_preview_{layer_index}.png"
+        render_filename = f"internal_mask_render_{layer_index}.png"
+
+        preview_mask_pil.save(os.path.join(output_dir, preview_filename), "PNG")
+        render_mask_pil.save(os.path.join(output_dir, render_filename), "PNG")
+        
+        if os.path.exists(alpha_mask_path):
+            os.remove(alpha_mask_path)
+
+        return web.json_response({
+            "success": True, 
+            "preview_mask_details": { "name": preview_filename, "subfolder": "", "type": "input" },
+            "render_mask_details": { "name": render_filename, "subfolder": "", "type": "input" }
+        })
+
+    except Exception as e:
+        import traceback
+        print(f"[Layer System] ERREUR API finalize_painter_mask: {e}")
+        traceback.print_exc()
+        return web.Response(status=500, text=str(e))
         
 
 NODE_CLASS_MAPPINGS = { "LayerSystem": LayerSystem }

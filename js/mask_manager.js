@@ -327,9 +327,7 @@ createContextualToolbar() {
 
     creationContainer.append(drawMaskButton);
     editionContainer.append(reeditMaskButton, deleteMaskButton);
-
     buttonContainer.append(creationContainer, editionContainer);
-
     buttonContainer.append(removeBgButton);
 
     [drawMaskButton, reeditMaskButton, deleteMaskButton, removeBgButton].forEach(btn => {
