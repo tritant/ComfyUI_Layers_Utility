@@ -6,7 +6,7 @@ export class MaskPainterManager {
         this.settings = {
             size: 30,
             hardness: 80,
-            opacity: 100,			// Le retour de la dureté !
+            opacity: 100,
             mode: 'brush'
         };
 
@@ -41,22 +41,22 @@ createSettingsToolbar() {
         position: 'fixed', display: 'none', zIndex: '10002',
         backgroundColor: 'rgba(40, 40, 40, 0.9)', border: '1px solid #555',
         borderRadius: '8px', padding: '8px', alignItems: 'center',
-        gap: '8px', color: 'white', fontFamily: 'sans-serif'
+        gap: '6px', color: 'white', fontFamily: 'sans-serif'
     });
 
     this.toolbar.innerHTML = `
         <label>Size:</label>
-        <input type="range" min="1" max="500" value="${this.settings.size}" data-setting="size" style="width: 80px;">
-        <span style="min-width: 30px;" data-value="size">${this.settings.size}</span>
-        <label style="margin-left: 10px;">Hardness:</label>
-        <input type="range" min="0" max="100" value="${this.settings.hardness}" data-setting="hardness" style="width: 80px;">
-        <span style="min-width: 30px;" data-value="hardness">${this.settings.hardness}%</span>
-        <label style="margin-left: 10px;">Opacity:</label>
-        <input type="range" min="1" max="100" value="${this.settings.opacity}" data-setting="opacity" style="width: 80px;">
-        <span style="min-width: 30px;" data-value="opacity">${this.settings.opacity}%</span>
+        <input type="range" min="1" max="500" value="${this.settings.size}" data-setting="size" style="width: 60px;">
+        <span style="min-width: 10px;" data-value="size">${this.settings.size}</span>
+        <label style="margin-left: 1px;">Hardness:</label>
+        <input type="range" min="0" max="100" value="${this.settings.hardness}" data-setting="hardness" style="width: 60px;">
+        <span style="min-width: 10px;" data-value="hardness">${this.settings.hardness}%</span>
+        <label style="margin-left: 1px;">Opacity:</label>
+        <input type="range" min="1" max="100" value="${this.settings.opacity}" data-setting="opacity" style="width: 60px;">
+        <span style="min-width: 10px;" data-value="opacity">${this.settings.opacity}%</span>
         <button data-mode="brush" title="Brush (Reveal)" class="ls-tool-button">🖌️</button>
         <button data-mode="eraser" title="Eraser (Hide)" class="ls-tool-button">🧼</button>
-        <button data-action="apply" style="margin-left: 15px; background-color: #4CAF50; color: white; border: none; padding: 5px 10px; cursor: pointer;">Apply Mask</button>
+        <button data-action="apply" style="margin-left: 15px; background-color: #4CAF50; color: white; border: none; padding: 5px 10px; cursor: pointer;">Apply</button>
         <button data-action="cancel" style="margin-left: 5px; background-color: #f44336; color: white; border: none; padding: 5px 10px; cursor: pointer;">Cancel</button>
     `;
     document.body.appendChild(this.toolbar);
@@ -96,7 +96,6 @@ async show() {
     const layerImage = this.node.loaded_preview_images[this.activeLayer.name];
     if (!layerImage || !layerImage.naturalWidth) return;
 
-    // On éteint le calque dans le rendu principal
     const props = this.node.layer_properties[this.activeLayer.name];
     props.enabled = false;
     this.node.refreshUI();
@@ -149,22 +148,19 @@ async show() {
         }
 
         if (hasAlpha) {
-            // CAS 1 : Masque de l'éditeur (RGBA). Ton test prouve qu'il faut inverser sa transparence.
             for (let i = 0; i < data.length; i += 4) {
-                data[i + 3] = 255 - data[i + 3]; // On inverse le canal alpha existant
-                data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; // Et on normalise le RGB
+                data[i + 3] = 255 - data[i + 3];
+                data[i] = 255; data[i + 1] = 255; data[i + 2] = 255;
             }
         } else {
-            // CAS 2 : Masque de notre outil (RGB Noir/Blanc). Cette logique est correcte et n'inverse pas.
             for (let i = 0; i < data.length; i += 4) {
-                data[i + 3] = 255 - data[i]; // alpha = 255 - luminance
+                data[i + 3] = 255 - data[i];
                 data[i] = data[i+1] = data[i+2] = 255;
             }
         }
         this.maskCtx.putImageData(imageData, 0, 0);
 
     } else {
-        // Un nouveau masque est entièrement opaque (calque visible).
         this.maskCtx.fillStyle = 'white';
         this.maskCtx.fillRect(0, 0, this.maskCanvas.width, this.maskCanvas.height);
     }
@@ -188,10 +184,9 @@ drawStamp(point) {
         gradient.addColorStop(0, 'white');
         gradient.addColorStop(hardnessStop, 'white');
         gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        // On revient à 'lighter'
         ctx.globalCompositeOperation = 'lighter';
         ctx.fillStyle = gradient;
-    } else { // La gomme reste correcte
+    } else {
         gradient.addColorStop(0, 'black');
         gradient.addColorStop(hardnessStop, 'black');
         gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -209,7 +204,7 @@ drawStamp(point) {
         if (this.activeLayer) {
             const props = this.node.layer_properties[this.activeLayer.name];
             if (props) {
-                props.enabled = true; // On rallume le calque
+                props.enabled = true;
 				this.node.updatePropertiesJSON();
             }
         }
@@ -228,11 +223,7 @@ drawStamp(point) {
 
 async switchLayer() {
     this.hide();
-    
-    // On attend un tout petit peu pour laisser le temps à l'interface principale 
-    // de traiter le clic et de changer le calque actif.
     await new Promise(resolve => setTimeout(resolve, 0));
-    
     this.show();
 }
 
@@ -247,11 +238,7 @@ async finalizeDrawing() {
         const formData = new FormData();
         formData.append("image", file);
         formData.append("overwrite", "true");
-        
-        // --- CORRECTION ---
-        // On sauvegarde le fichier temporaire dans 'input' au lieu de 'temp'
         formData.append("type", "input");
-        // --- FIN CORRECTION ---
 
         let response = await fetch("/upload/image", { method: "POST", body: formData });
         const tempAlphaMaskDetails = await response.json();
@@ -325,7 +312,6 @@ async finalizeDrawing() {
 handleMouseEvent(e) {
     if (!this.activeLayer) return;
 
-    // La gestion de la barre d'outils reste la même
     const mainCanvasRect = this.node.previewCanvas.getBoundingClientRect();
     const zoom = app.canvas.ds.scale || 1;
     const mouseX = (e.clientX - mainCanvasRect.left) / zoom;
@@ -347,22 +333,18 @@ handleMouseEvent(e) {
         this.isDrawing = true;
         const coords = this.getOriginalCoords(e);
         this.lastPoint = coords;
-        this.drawStamp(coords); // On dessine le premier point
+        this.drawStamp(coords);
     } 
     else if (e.type === 'mousemove') {
         if (this.isDrawing) {
             const coords = this.getOriginalCoords(e);
-            
-            // --- TA SOLUTION : L'ESPACEMENT ---
             const dist = Math.hypot(coords.x - this.lastPoint.x, coords.y - this.lastPoint.y);
-            const spacing = this.settings.size / 2; // On peut ajuster cette valeur
+            const spacing = this.settings.size / 2;
 
-            // On ne dessine un nouveau segment que si on a bougé suffisamment
             if (dist >= spacing) {
                 this.drawStroke(this.lastPoint, coords);
-                this.lastPoint = coords; // On met à jour la position du dernier point DESSINÉ
+                this.lastPoint = coords;
             }
-            // --- FIN DE LA SOLUTION ---
         }
     } 
     else if (e.type === 'mouseup' || e.type === 'mouseleave') {
@@ -387,8 +369,6 @@ handleMouseEvent(e) {
     updateLivePreview(mouseEvent = null) {
         if (!this.liveCtx) return;
         this.liveCtx.clearRect(0, 0, this.liveOverlay.width, this.liveOverlay.height);
-
-        // On ne dessine plus le fond, il est déjà visible en dessous !
 
         const tempLayerCanvas = document.createElement('canvas');
         tempLayerCanvas.width = this.maskCanvas.width;
