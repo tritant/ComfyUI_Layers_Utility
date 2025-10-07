@@ -356,14 +356,14 @@ nodeType.prototype.loadStateFromConfig = function(info) {
                 const props = JSON.parse(info.widgets_values[jsonWidgetIndex]);
                 this.base_image_properties = props.base || null;
                 this.layer_properties = props.layers || {};
-                //this.preview_data = props.preview_data || {};
+
                 if (this.toolbar) {
                     this.toolbar.textElements = props.texts || [];
                 } else {
                     this.loadedTextData = props.texts || [];
                 }
                 this.stateLoaded = true;
-                //app.queuePrompt();
+
                 setTimeout(() => {
                     this.refreshPreviewsOnly();
                 }, 100);
@@ -396,7 +396,6 @@ nodeType.prototype.refreshPreviewsOnly = async function() {
 
         const ui_data = await response.json();
         
-        // On simule un message "executed" pour déclencher le rafraîchissement des images
         if (ui_data.layer_previews) {
             this.onExecuted({ layer_previews: ui_data.layer_previews });
         }
@@ -1637,26 +1636,22 @@ nodeType.prototype.handleInternalImageLoad = function() {
             const timestamp = Date.now();
             const staticFilename = isBaseImage ? "layersystem_base.png" : `layersystem_${timestamp}.png`;
 
-            // --- NOUVELLE LOGIQUE : CHARGEMENT LOCAL ---
-            // 1. On crée une URL locale temporaire pour l'image choisie
             const localUrl = URL.createObjectURL(originalFile);
             const newImage = new Image();
             newImage.src = localUrl;
-            await new Promise(resolve => newImage.onload = resolve); // On attend que l'image soit chargée
-            // --- FIN DE LA NOUVELLE LOGIQUE ---
+            await new Promise(resolve => newImage.onload = resolve);
 
-            // On lance l'upload vers le serveur en arrière-plan
             const newFile = new File([originalFile], staticFilename, { type: originalFile.type });
             const formData = new FormData();
             formData.append('image', newFile);
             formData.append('overwrite', 'true');
             formData.append('type', 'input');
             const response = await fetch('/upload/image', { method: 'POST', body: formData });
-            const data = await response.json(); // On récupère les infos du fichier sauvegardé
+            const data = await response.json();
 
             if (isBaseImage) {
                 this.base_image_properties = { filename: data.name, details: data };
-                this.loaded_preview_images['base_image'] = newImage; // On met l'image chargée dans le cache
+                this.loaded_preview_images['base_image'] = newImage;
                 this.basePreviewImage = newImage;
             } else {
                 const existingIndices = new Set(Object.keys(this.layer_properties).map(k => parseInt(k.split('_')[1])));
@@ -1676,15 +1671,12 @@ nodeType.prototype.handleInternalImageLoad = function() {
                     rotation: 0.0, brightness: 0.0, contrast: 0.0, color_r: 1.0, color_g: 1.0, color_b: 1.0, saturation: 1.0,
                     invert_mask: false, color_section_collapsed: true, layer_collapsed: false,
                 };
-                this.loaded_preview_images[layerName] = newImage; // On met l'image chargée dans le cache
+                this.loaded_preview_images[layerName] = newImage;
             }
             
             this.updatePropertiesJSON();
             this.refreshUI();
-            this.redrawPreviewCanvas(); // On redessine l'aperçu localement
-
-            // On ne lance PAS de rendu backend
-            // app.queuePrompt();
+            this.redrawPreviewCanvas();
 
         } catch (error) {
             console.error("Error uploading file:", error);
