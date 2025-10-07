@@ -11,7 +11,6 @@ async performRemoveBg() {
     const layerIndex = activeLayer.index;
     const layerName = activeLayer.name;
     const previewInfo = this.node.preview_data?.[layerName];
-    //const sourceFilename = previewInfo?.filename;
     const layerProps = this.node.layer_properties?.[layerName];
     const sourceFilename = layerProps?.source_filename;
 	
