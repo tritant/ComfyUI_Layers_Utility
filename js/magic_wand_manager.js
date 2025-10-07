@@ -52,7 +52,6 @@ async handleCanvasClick(e) {
     const localX = unrotatedDx + transformedWidth / 2;
     const localY = unrotatedDy + transformedHeight / 2;
 	
-	 // --- COLLEZ CE BLOC DE DIAGNOSTIC ICI ---
     console.log("--- DIAGNOSTIC BAGUETTE MAGIQUE ---");
     console.log(`clickX (e.offsetX): ${clickX}`);
     console.log(`preview.width: ${preview.width}`);
@@ -62,7 +61,6 @@ async handleCanvasClick(e) {
     console.log(`props.scale: ${props.scale}`);
     console.log(`props.offset_x: ${props.offset_x}`);
     console.log("---------------------------------");
-    // --- FIN DU BLOC DE DIAGNOSTIC ---
 
     const finalX = Math.round(localX * (layerImage.naturalWidth / transformedWidth));
     const finalY = Math.round(localY * (layerImage.naturalHeight / transformedHeight));
